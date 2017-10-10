@@ -1,0 +1,25 @@
+.item textarea {
+    width: 640px;
+    height: 120px;
+    font-family: monospace;
+}
+
+.error {
+    color: red;
+}
+
+.menu-link {
+    display: inline-block;
+    padding: 8px;
+    margin-right: 2px;
+    background-color: #dfdfdf;
+}
+
+.menu-link.selected {
+    background-color: #9f9f9f;
+}
+
+.vault-key-view textarea {
+    width: 640px;
+    height: 100px;
+}

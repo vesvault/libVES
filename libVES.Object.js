@@ -1,0 +1,589 @@
+libVES.Object = function(data) {
+    for (var k in data) this[k] = data[k];
+};
+
+libVES.Object.prototype = {
+    fieldList: {id: true},
+    fieldExtra: {},
+    fieldClass: {},
+    fieldSets: [],
+    init: function(data,VES,refs) {
+	this.VES = VES;
+	this.fieldUpdate = {id: true};
+	this.setFields(data,data.id == null);
+	if (refs) for (var k in refs) this[k] = Promise.resolve(refs[k]);
+    },
+    setFields: function(data,up) {
+	var self = this;
+	for (var k in data) {
+	    if (up === undefined || up) this.fieldUpdate[k] = true;
+	    var v = data[k];
+	    var clsf;
+	    if (this.fieldClass[k]) v = (clsf = function(v) {
+		if (v instanceof libVES.Object) return v;
+		else if (v instanceof Array) return v.map(function(vv) { return clsf(vv); });
+		else return new (self.fieldClass[k])(v,this.VES);
+	    })(v);
+	    if (this[k] === undefined || this[k] instanceof Promise) this[k] = Promise.resolve(v);
+	    else return Promise.reject(new libVES.Error('Internal',"init: " + k));
+	}
+    },
+    setField: function(fld,val) {
+	var flds = {};
+	flds[fld] = val;
+	this.setFields(flds);
+	return val;
+    },
+    getField: function(fld,fldlst) {
+	var self = this;
+	if (!this[fld]) {
+	    var flds = {};
+	    for (var i = 0; i < this.fieldSets.length; i++) if (this.fieldSets[i][fld]) {
+		for (var k in this.fieldSets[i]) flds[k] = this.fieldSets[i][k];
+		break;
+	    }
+	    if (fldlst) flds[fld] = fldlst;
+	    if (!flds[fld]) {
+		var cls = self.fieldClass[fld];
+		flds[fld] = cls ? cls.prototype.fieldList : true;
+	    }
+	    var req = this.id ? this.id.then(function(id) { return self.VES.get(self.apiUri + '/' + id,flds); }) : self.postData().then(function(data) {
+		return self.VES.post(self.apiUri,data,flds);
+	    }).then(function(data) {
+		if (data.id) {
+		    self.id = Promise.resolve(data.id);
+		    self.fieldUpdate = {id: true};
+		}
+		return data;
+	    });
+	    for (var k in flds) if (this[k] === undefined) {
+		this[k] = req.then((function(fld) {
+		    var cls = self.fieldClass[fld];
+		    return function(data) {
+			if (cls && data[fld]) return ((data[fld] instanceof Array) ? data[fld].map(function(v) {
+			    return new cls(v,self.VES);
+			}) : new cls(data[fld],self.VES));
+			return data[fld];
+		    };
+		})(k));
+	    }
+	}
+	return this[fld];
+    },
+    reset: function() {
+	for (var k in this.fieldClass) delete(this[k]);
+	return Promise.resolve();
+    },
+    getId: function() {
+	return this.id != null ? Promise.resolve(this.id) : Promise.reject(new libVES.Error('InvalidVaule',"id is null"));
+    },
+    postData: function(fields) {
+	var data = {};
+	var prs = [];
+	var self = this;
+	var fmt = function(v,a) {
+	    if (v instanceof libVES.Object) return v.postData(a);
+	    else if (v instanceof Array) return Promise.all(v.map(function(vv) {
+		return fmt(vv,a);
+	    }));
+	    else return v;
+	};
+	var pf = function(k,pr,a) {
+	    if (!(pr instanceof Promise)) pr = fmt(pr,a);
+	    if (pr instanceof Promise) prs.push(pr.then(function(pr2) {
+		return Promise.resolve(fmt(pr2,a)).then(function(v) {
+		    data[k] = v;
+		});
+	    }));
+	    else data[k] = pr;
+	};
+	if (!(fields instanceof Object)) fields = this.fieldUpdate;
+	if (fields) for (var k in fields) if (this[k] !== undefined) pf(k,this[k],fields[k]);
+	return Promise.all(prs).then(function() {
+	    return data;
+	});
+    },
+    post: function(fields,rfields,optns) {
+	var self = this;
+	if (!optns) optns = {};
+	if (optns.retry == null) optns.retry = 3;
+	return this.postData(fields).then(function(d) {
+	    return self.VES.post(self.apiUri,d,rfields,{
+		onerror: function(errors) {
+		    if (optns.retry-- <= 0) throw new libVES.Error('RequestFailed',"Retry count exceeded",{errors: errors});
+		    var rs = [];
+		    for (var i = 0; i < errors.length; i++) {
+			if (!errors[i].path) throw errors[i];
+			rs.push(self.resolveErrorPath(errors[i]));
+		    }
+		    return Promise.all(rs).then(function() {
+			return self.post(fields,rfields,optns);
+		    });
+		}
+	    });
+	});
+    },
+    resolveErrorPath: function(e,idx) {
+	var self = this;
+	if (!e.path) throw e;
+	if (!idx) idx = 0;
+	if (e.path.length == idx) return this.resolveError(e,null);
+	var f = e.path[idx++];
+	if (this[f] === undefined) throw new libVES.Error('BadPath',"Path not found: " + f,{error: e});
+	return Promise.resolve(this[f]).then(function(v) {
+	    if (v instanceof libVES.Object) return v.resolveErrorPath(e,idx);
+	    else if ((e.path.length > idx) && (v instanceof Array)) {
+		var i = e.path[idx++];
+		if (v[i] === undefined) throw new libVES.Error('BadPath',"Path not found: " + i,{error: e});
+		else if (v[i] instanceof libVES.Object) return v[i].resolveErrorPath(e,idx);
+		else throw e;
+	    } else return self.resolveError(e,f);
+	});
+    },
+    resolveError: function(e,field) {
+	throw e;
+    }
+};
+
+
+libVES.User = function(data,VES,refs) {
+    this.init(data,VES,refs);
+};
+
+libVES.VaultKey = function(data,VES,refs) {
+    this.init(data,VES,refs);
+};
+
+libVES.VaultItem = function(data,VES,refs) {
+    this.vaultEntryByKey = {};
+    this.init(data,VES,refs);
+};
+
+libVES.External = function(data,VES,refs) {
+    this.init(data,VES,refs);
+};
+
+libVES.Lockbox = function(data,VES,refs) {
+    this.init(data,VES,refs);
+};
+
+libVES.File = function(data,VES,refs) {
+    this.init(data,VES,refs);
+};
+
+libVES.User.prototype = new libVES.Object({
+    apiUri: 'users',
+    fieldList: {id: true, email: true, type: true, firstName: true, lastName: true},
+    fieldExtra: {vaultKeys: true, activeVaultKeys: true, currentVaultKey: true},
+    fieldClass: {vaultKeys: libVES.VaultKey, activeVaultKeys: libVES.VaultKey, currentVaultKey: libVES.VaultKey, shadowVaultKey: libVES.VaultKey},
+    getEmail: function() {
+	return this.getField('email');
+    },
+    getFirstName: function() {
+	return this.getField('firstName');
+    },
+    getLastName: function() {
+	return this.getField('lastName');
+    },
+    getFullName: function() {
+	var self = this;
+	return this.getFirstName().then(function(f) {
+	    return self.getLastName().then(function(l) {
+		return f ? (l ? f + ' ' + l : f) : l;
+	    });
+	});
+    },
+    getVaultKeys: function() {
+	return this.getField('vaultKeys');
+    },
+    getActiveVaultKeys: function() {
+	return this.getField('activeVaultKeys');
+    },
+    getCurrentVaultKey: function() {
+/*
+	if (!this.currentVaultKey) {
+	    if (this.vaultKeys) this.currentVaultKey = this.vaultKeys.then(function(vks) {
+		for (var i = 0; i < vks.length; i++) if (vks[i].type == 'current') return vks[i];
+		for (var i = 0; i < vks.length; i++) if (vks[i].type == 'temp' && vks[i].creatorUser && vks[i].creatorUser.id == self.id) return vks[i];
+	    });
+	    else if (this.activeVaultKeys) this.currentVaultKey = this.activeVaultKeys.then(function(vks) {
+		return vks[0];
+	    });
+	}
+*/
+	return this.getField('currentVaultKey');
+    },
+    getShadowVaultKey: function() {
+	return this.getField('shadowVaultKey');
+    },
+    getExternals: function() {
+	return this.getField('externals');
+    },
+    getExternalsByDomain: function() {
+	return this.getExternals().then(function(ex) {
+	    var rs = {};
+	    for (var i = 0; i < ex.length; i++) (rs[ex[i].domain] || (rs[ex[i].domain] = [])).push(ex[i]);
+	    return rs;
+	});
+    },
+    unlock: function(veskey) {
+	return this.getCurrentVaultKey().then(function(k) {
+	    return k.unlock(veskey);
+	});
+    },
+    lock: function(veskey) {
+	if (this.currentVaultKey) return this.currentVaultKey.then(function(k) {
+	    return k.lock();
+	});
+    },
+});
+
+
+libVES.VaultKey.prototype = new libVES.Object({
+    apiUri: 'vaultKeys',
+    fieldList: {id: true, algo: true, type: true, publicKey: true, privateKey: true},
+    fieldClass: {user: libVES.User, vaultItems: libVES.VaultItem, externals: libVES.External, sharedKeys: libVES.VaultKey},
+    fieldExtra: {user: true, vaultItems: true},
+    fieldSets: [{vaultEntries: {id: true, encData: true, vaultItem: {id: true}}}],
+    getAlgo: function() {
+	return this.getField('algo');
+    },
+    getType: function() {
+	return this.getField('type');
+    },
+    getPublicKey: function() {
+	return this.getField('publicKey');
+    },
+    getPrivateKey: function() {
+	return this.getField('privateKey');
+    },
+    getUnlockedPrivateKey: function() {
+	var self = this;
+	return this.unlock().then(function(k) {
+	    return self.engine().then(function(e) {
+		return e.export(k,{opentext:true});
+	    });
+	});
+    },
+    getVaultItems: function() {
+	return this.getField('vaultItems');
+    },
+    getSharedKeys: function() {
+	return this.getField('sharedKeys');
+    },
+    getExternals: function() {
+	return this.getField('externals');
+    },
+    getUser: function() {
+	return this.getField('user');
+    },
+    getVaultItems: function() {
+	return this.getField('vaultItems');
+    },
+    resolveVESkey: function(veskey) {
+	if (veskey) return Promise.resolve(veskey);
+	var self = this;
+	return self.getType().then(function(t) {
+	    switch (t) {
+	    case 'secondary':
+	    case 'temp':
+		return self.getVaultItems().then(function(vis) {
+		    var f = function(vis) {
+			if (!vis.length) throw new libVES.Error('InvalidKey','Cannot unlock the secondary key');
+			return vis[0].getType().then(function(t) {
+			    switch (t) {
+				case 'password': return vis[0].get();
+				default: return f(vis.slice(1));
+			    }
+			});
+		    };
+		    return f(vis);
+		});
+	    default: console.log(self); throw new libVES.Error('InvalidKey','Cannot unlock the key');
+	    }
+	});
+    },
+    unlock: function(veskey) {
+	var self = this;
+	if (!this.wcPriv) return this.wcPriv = self.getId().then(function(id) {
+	    var wcp = self.engine().then(function(m) {
+		return self.resolveVESkey(veskey).then(function(v) {
+		    return self.getPrivateKey().then(function(prk) {
+			return m.import(prk,{password: v});
+		    });
+		});
+	    });
+	    self.VES.unlockedKeys[id] = wcp.then(function() {
+		return self;
+	    });
+	    return wcp;
+	});
+	else return self.wcPriv.catch(function(e) {
+	    self.wcPriv = null;
+	    return self.unlock(veskey);
+	});
+    },
+    lock: function() {
+	var self = this;
+	return this.getId().then(function(id) {
+	    delete(self.wcPriv);
+	    delete(self.VES.unlockedKeys[id]);
+	    return true;
+	});
+    },
+    unlockPub: function() {
+	if (!this.wcPub) {
+	    var self = this;
+	    self.wcPub = this.engine().then(function(e) {
+		return self.getPublicKey().then(function(pubk) {
+		    return e.import(pubk);
+		});
+	    });
+	}
+	return this.wcPub;
+    },
+    engine: function() {
+	return this.getAlgo().then(function(algo) {
+	    return libVES.getModule(libVES.Algo,algo);
+	});
+    },
+    generate: function(veskey,optns) {
+	var self = this;
+	var wc = optns && optns.privateKey ? libVES.Algo.acquire(optns.privateKey).then(function(wc) {
+	    self.setField('algo',wc.engine.tag);
+	    if (!wc.privateKey) throw new libVES.Error('InvalidValue','Private key expected');
+	    return wc;
+	}) : this.engine().then(function(e) {
+	    return e.generate(optns).then(function(ks) {
+		ks.engine = e;
+		return ks;
+	    });
+	});
+	return Promise.resolve(veskey).then(function(v) {
+	    self.wcPub = wc.then(function(ks) {
+		return ks.publicKey;
+	    });
+	    self.setField('publicKey',wc.then(function(ks) {
+		return ks.engine.export(ks.publicKey);
+	    }));
+	    self.wcPriv = wc.then(function(ks) {
+		return ks.privateKey;
+	    });
+	    self.setField('privateKey',wc.then(function(ks) {
+		return ks.engine.export(ks.privateKey,{password:v});
+	    }));
+	    return self;
+	});
+    },
+    encrypt: function(ptxt) {
+	var self = this;
+	return self.engine().then(function(e) {
+	    return self.unlockPub().then(function(k) {
+		return e.encrypt(k,ptxt).then(function(ctxt) {
+		    return libVES.Util.ByteArrayToB64(ctxt);
+		});
+	    });
+	});
+    },
+    decrypt: function(ctxt) {
+	var self = this;
+	return self.engine().then(function(e) {
+	    return self.unlock().then(function(k) {
+		return e.decrypt(k,libVES.Util.B64ToByteArray(ctxt));
+	    });
+	});
+    },
+    getVaultEntries: function(details) {
+	return this.getField('vaultEntries',{id: true, encData: true, vaultItem: (typeof(details) == 'object' ? details : ((details != null && !details) ? true : {id: true, type: true, meta: true}))});
+    },
+    rekeyFrom: function(key,veskey) {
+	var self = this;
+	self.setField('vaultEntries',key.unlock(veskey).then(function() {
+	    return key.getVaultEntries().then(function(ves) {
+		return Promise.all(ves.map(function(ve) {
+		    return key.decrypt(ve.encData).then(function(ptxt) {
+			return self.encrypt(ptxt).then(function(ctxt) {
+			    return {
+				vaultItem: {id: ve.vaultItem.id},
+				encData: ctxt
+			    };
+			});
+		    }).catch(function(e) {
+			return {
+			    vaultItem: {id: ve.vaultItem.id},
+			    ".op": "ignore"
+			};
+		    });
+		}));
+	    });
+	}));
+	return self;
+    },
+    getRecovery: function() {
+	var self = this;
+	return self.getType().then(function(t) {
+	    switch (t) {
+		case 'shadow': case 'recovery': return self.getVaultItems().then(function(vis) {
+		    var frnds = {};
+		    return self.getUser().then(function(my_u) {
+			return my_u.getId().then(function(my_uid) {
+			    return Promise.all(vis.map(function(vi) {
+				var frnd = {vaultItem: vi};
+				return Promise.all([
+				    vi.getVaultEntries().then(function(ves) {
+					return Promise.all(ves.map(function(ve) {
+					    return new libVES.VaultKey(ve.vaultKey,self.VES).getUser().then(function(u) {
+						return u.getId().then(function(uid) {
+						    if (uid == my_uid) frnd.assist = true;
+						    else {
+							frnd.user = u;
+							frnds[uid] = frnd;
+						    }
+						});
+					    });
+					}));
+				    }),
+				    vi.getMeta().then(function(meta) {
+					frnd.meta = meta;
+				    }),
+				    vi.get().then(function(data) {
+					frnd.data = data;
+				    }).catch(function(){})
+				]);
+			    }));
+			});
+		    }).then(function() {
+			var rs = [];
+			for (var id in frnds) rs.push(frnds[id]);
+			return {tokens: rs};
+		    });
+		});
+		default: throw new libVES.Error('InvalidValue','Recovery info is applicable for key type shadow or recovery');
+	    }
+	});
+    }
+});
+
+libVES.VaultItem.prototype = new libVES.Object({
+    apiUri: 'vaultItems',
+    fieldList: {id: true},
+    fieldClass: {vaultKey: libVES.VaultKey, file: libVES.File},
+    fieldSets: [{type: true, meta: true},{vaultEntries: {id: true, encData: true, vaultKey: {id: true}}},{vaultKey: true, file: true, lockbox: true}],
+    defaultCipher: 'AES256',
+    getRaw: function() {
+	var self = this;
+	for (var kid in this.VES.unlockedKeys) if (this.vaultEntryByKey[kid]) {
+	    return this.VES.unlockedKeys[kid].then(function(k) {
+		return k.decrypt(self.vaultEntryByKey[kid].encData);
+	    });
+	}
+	if (!this.vaultEntries) return this.getVaultEntries().then(function(ves) {
+	    return self.getRaw();
+	});
+	return Promise.reject(new libVES.Error('InvalidKey',"No unlocked key to decrypt the item"));
+    },
+    get: function() {
+	var self = this;
+	return this.getRaw().then(function(buf) {
+	    return self.parse(buf);
+	});
+    },
+    getType: function() {
+	return this.getField('type');
+    },
+    getMeta: function() {
+	return this.getField('meta');
+    },
+    getVaultEntries: function() {
+	var self = this;
+	return this.getField('vaultEntries').then(function(ves) {
+	    for (var i = 0; i < ves.length; i++) self.vaultEntryByKey[ves[i].vaultKey.id] = ves[i];
+	    return ves;
+	});
+    },
+    getVaultKey: function() {
+	return this.getField('vaultKey');
+    },
+    getFile: function() {
+	return this.getField('file');
+    },
+    getLockbox: function() {
+	return this.getField('lockbox');
+    },
+    parse: function(buf) {
+	var self = this;
+	return this.getType().then(function(type) {
+	    return libVES.getModule(libVES.VaultItem.Type,type).then(function(m) {
+		return m.parse.call(self,buf);
+	    }).catch(function(e) {
+		return new Uint8Array(buf);
+	    });
+	});
+    },
+    build: function(data) {
+	var self = this;
+	return this.getType().then(function(type) {
+	    return libVES.getModule(libVES.VaultItem.Type,type).then(function(m) {
+		return m.build.call(self,data);
+	    });
+	});
+    },
+    shareWith: function(usrs,val,save) {
+	var self = this;
+	return this.setField('vaultEntries',Promise.resolve((val != null && this.vaultEntries) || []).then(function(ves) {
+	    return (val == null ? self.getRaw() : self.build(val)).then(function(v) {
+		return self.VES.usersToKeys(usrs).then(function(ks) {
+		    return Promise.all(ves.map(function(v,i) { return v.getId(); })).then(function(kids) {
+			return ks.map(function(k,j) {
+			    return Promise.resolve(k.id).then(function(kid) {
+				if (kid && kids.indexOf(kid) >= 0) return ves[i];
+				return k.encrypt(v).then(function(ctext) {
+				    return k.postData().then(function(pd) {
+					return {vaultKey: pd, encData: ctext};
+				    });
+				});
+			    });
+			});
+		    });
+		});
+	    });
+	})).then(function() {
+	    return (save || save === undefined) ? self.post() : self;
+	});
+    }
+});
+libVES.VaultItem.Type = {
+    string: {
+	parse: function(buf) {
+	    return libVES.Util.ByteArrayToString(buf);
+	},
+	build: function(data) {
+	    return libVES.Util.StringToByteArray(data);
+	}
+    },
+    file: {
+	parse: function(buf) {
+	    var self = this;
+	    return this.getMeta().then(function(meta) {
+		var ci = libVES.Cipher[meta.a || self.defaultCipher];
+		return new ci(new Uint8Array(buf));
+	    });
+	},
+	build: function(data) {
+	    if (!(data instanceof libVES.Cipher)) throw new libVES.Error('InvalidData',"Content of a VaultItem type 'file' must be libVES.Cipher");
+	    return ci.serialize();
+	}
+    }
+};
+libVES.VaultItem.Type.password = libVES.VaultItem.Type.string;
+
+libVES.External.prototype = new libVES.Object({
+    apiUri: 'externals',
+    fieldList: {id: true},
+    getDomain: function() {
+	return this.getField('domain');
+    },
+    getExternalId: function() {
+	return this.getField('externalId');
+    }
+});
