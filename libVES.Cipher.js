@@ -1,3 +1,9 @@
+/**
+ * @title libVES.Cipher
+ *
+ * @author Jim Zubov <jz@vesvault.com> (VESvault)
+ * GPL license, http://www.gnu.org/licenses/
+ */
 libVES.Cipher = function(data) {
     for (var k in data) this[k] = data[k];
 };

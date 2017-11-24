@@ -1,3 +1,9 @@
+/**
+ * @title libVES.Util
+ *
+ * @author Jim Zubov <jz@vesvault.com> (VESvault)
+ * GPL license, http://www.gnu.org/licenses/
+ */
 libVES.Util = {
     B64ToByteArray: function(s) {
 	var buf = new Uint8Array(s.length);
@@ -29,6 +35,7 @@ libVES.Util = {
 	return s;
     },
     StringToByteArray: function(s) {
+	if ((s instanceof ArrayBuffer) || (s instanceof Uint8Array)) return s;
 	var rs = new Uint8Array(4 * s.length);
 	var j = 0;
 	for (var i = 0; i < s.length;i++) {
@@ -80,7 +87,7 @@ libVES.Util = {
 	fromDER: function(der) {
 	},
 	encode: function(der,sgn) {
-	    return '-----BEGIN ' + sgn + '-----\n' + libVES.Util.ByteArrayToB64(der).match(/.{1,64}/g).join("\n") + '\n-----END ' + sgn + '-----';
+	    return '-----BEGIN ' + sgn + '-----\r\n' + libVES.Util.ByteArrayToB64(der).match(/.{1,64}/g).join("\r\n") + '\r\n-----END ' + sgn + '-----';
 	}
     },
     ASN1: {
@@ -141,7 +148,7 @@ libVES.Util = {
 		var rs;
 		if (l <= 127) {
 		    rs = new Uint8Array(l + 2);
-		    rs[1] = l;
+		    rs[1] = l; 
 		    rs.set(b,2);
 		} else {
 		    var lb = i2a(l);

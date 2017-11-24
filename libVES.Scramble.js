@@ -1,9 +1,17 @@
+/**
+ * @title libVES.Scramble
+ *
+ * @author Jim Zubov <jz@vesvault.com> (VESvault)
+ * GPL license, http://www.gnu.org/licenses/
+ */
 libVES.Scramble = {
     RDX: function(x) {
 	this.size = x;
     }
 };
 libVES.Scramble.RDX.prototype = {
+    tag: 'RDX1.2',
+    name: 'RDX 1.2 Shamir',
     getBases: function(n) {
 	var rs = [];
 	for (var b = 0; rs.length < n; b++) if (b % 4) rs.push(b);
@@ -72,8 +80,15 @@ libVES.Scramble.RDX.prototype = {
 	var self = this;
 	return this.toVector(sc).then(function(v) {
 	    var bs = self.getBases(ct);
-	    var rs = {};
-	    for (i = 0; i < bs.length; i++) rs[bs[i]] = self.scramble(v,bs[i]);
+	    var rs = [];
+	    for (i = 0; i < bs.length; i++) rs[i] = {
+		meta: {
+		    v: self.tag,
+		    n: self.size,
+		    b: bs[i]
+		},
+		value: self.scramble(v,bs[i])
+	    }
 	    return rs;
 	});
     },
@@ -91,30 +106,29 @@ libVES.Scramble.RDX.prototype = {
 	    return libVES.Math.div(v[v.length - 1],v[i]);
 	});
     },
-    implode: function(tokens,then,okf) {
+    implode: function(tokens,then,okfn) {
 	var self = this;
 	var f = function(offs) {
 	    var tks = {};
 	    var tidx = 0;
 	    var oidx = 0;
 	    var more = false;
-	    for (var b in tokens) {
+	    for (var i = 0; i < tokens.length; i++) {
 		if (tidx >= self.size) {
 		    more = true;
 		    break;
 		}
 		if (tidx >= self.size - offs[oidx]) oidx++;
 		else {
-		    tks[b] = tokens[b];
+		    tks[tokens[i].meta.b] = tokens[i].value;
 		    tidx++;
 		}
 	    }
 	    var v = self.unscramble(tks);
-//	    console.log(offs,tokens,tks,v,tidx,more);
 	    var rs = self.fromVector(v);
 	    if (then) rs = rs.then(then);
-	    if (okf) rs = rs.then(function(sc) {
-		for (var b in tokens) okf(b,!!tks[b] || !libVES.Math.cmp(tokens[b],self.scramble(v,b)));
+	    if (okfn) rs = rs.then(function(sc) {
+		for (var i = 0; i < tokens.length; i++) okfn(tokens[i],!!tks[b] && !libVES.Math.cmp(tokens[i].value,self.scramble(v,tokens[i].meta.b)),i);
 		return sc;
 	    });
 	    if (more) {
@@ -124,7 +138,6 @@ libVES.Scramble.RDX.prototype = {
 		for (var j = 1; j <= jmax; j++) rs = rs.catch((function(j) {
 		    return function() {
 			offs2[offs.length - 1] = j;
-//			console.log('offs2',offs2);
 			return f(offs2);
 		    };
 		})(j));
@@ -134,4 +147,6 @@ libVES.Scramble.RDX.prototype = {
 	return f([0]);
     }
 };
-libVES.Scramble['RDX1.2'] = libVES.Scramble.RDX;
+libVES.Scramble.algo = {
+    'RDX1.2': libVES.Scramble.RDX
+};

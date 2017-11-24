@@ -1,3 +1,9 @@
+/**
+ * @title libVES.Math
+ *
+ * @author Jim Zubov <jz@vesvault.com> (VESvault)
+ * GPL license, http://www.gnu.org/licenses/
+ */
 libVES.Math = {
     pad: function(a,n) {
 	if (isNaN(n)) n = 0;

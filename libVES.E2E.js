@@ -1,3 +1,9 @@
+/**
+ * @title libVES.E2E
+ *
+ * @author Jim Zubov <jz@vesvault.com> (VESvault)
+ * GPL license, http://www.gnu.org/licenses/
+ */
 libVES.E2E = function(optns) {
     for (var k in optns) this[k] = optns[k];
 };

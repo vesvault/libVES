@@ -1,3 +1,9 @@
+/**
+ * @title libVES.Algo
+ *
+ * @author Jim Zubov <jz@vesvault.com> (VESvault)
+ * GPL license, http://www.gnu.org/licenses/
+ */
 libVES.Algo = {
     RSA: {
 	tag: 'RSA',
@@ -67,6 +73,12 @@ libVES.Algo = {
 	tag: 'RSA_PKCS1_15',
 	import: function(data,optns) {
 	    return libVES.Util.PEM.import(data,optns);
+	},
+	encrypt: function(k,buf) {
+	    throw new libVES.Error('InvalidValue','PKCS#1 1.5 padding is not supported');
+	},
+	decrypt: function(k,buf) {
+	    throw new libVES.Error('InvalidValue','PKCS#1 1.5 padding is not supported');
 	}
     },
     acquire: function(key,optns) {

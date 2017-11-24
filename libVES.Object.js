@@ -1,5 +1,12 @@
+/**
+ * @title libVES.Object
+ *
+ * @author Jim Zubov <jz@vesvault.com> (VESvault)
+ * GPL license, http://www.gnu.org/licenses/
+ */
 libVES.Object = function(data) {
     for (var k in data) this[k] = data[k];
+    if (window.Trigger) this.trigger = Trigger.resolve(this);
 };
 
 libVES.Object.prototype = {
@@ -9,34 +16,45 @@ libVES.Object.prototype = {
     fieldSets: [],
     init: function(data,VES,refs) {
 	this.VES = VES;
-	this.fieldUpdate = {id: true};
+	this.fieldUpdate = data.id ? {id: true} : {};
 	this.setFields(data,data.id == null);
 	if (refs) for (var k in refs) this[k] = Promise.resolve(refs[k]);
     },
     setFields: function(data,up) {
 	var self = this;
+	var chg = false;
 	for (var k in data) {
 	    if (up === undefined || up) this.fieldUpdate[k] = true;
-	    var v = data[k];
-	    var clsf;
-	    if (this.fieldClass[k]) v = (clsf = function(v) {
-		if (v instanceof libVES.Object) return v;
-		else if (v instanceof Array) return v.map(function(vv) { return clsf(vv); });
-		else return new (self.fieldClass[k])(v,this.VES);
-	    })(v);
-	    if (this[k] === undefined || this[k] instanceof Promise) this[k] = Promise.resolve(v);
-	    else return Promise.reject(new libVES.Error('Internal',"init: " + k));
+	    if (this[k] instanceof Promise) {
+		this[k] = undefined;
+		chg = true;
+	    }
+	    if (this[k] === undefined) this[k] = Promise.resolve(data[k]).then((function(k) {
+		return function(v) {
+		    var clsf;
+		    if (self.fieldClass[k]) return (clsf = function(v) {
+			if (v instanceof libVES.Object) return v;
+			else if (v instanceof Array) return v.map(function(vv) { return clsf(vv); });
+			else return new (self.fieldClass[k])(v,self.VES);
+		    })(v);
+		    return v;
+		};
+	    })(k));
+	    else return Promise.reject(new libVES.Error('Internal',"Unknown field: " + k));
 	}
+	if (chg && self.trigger) self.trigger.resolve(self);
+	return Promise.resolve(self);
     },
-    setField: function(fld,val) {
+    setField: function(fld,val,upd) {
 	var flds = {};
 	flds[fld] = val;
-	this.setFields(flds);
-	return val;
+	return this.setFields(flds,upd).then(function(self) {
+	    return self[fld];
+	});
     },
-    getField: function(fld,fldlst) {
+    getField: function(fld,fldlst,force) {
 	var self = this;
-	if (!this[fld]) {
+	if (!this[fld] || force) {
 	    var flds = {};
 	    for (var i = 0; i < this.fieldSets.length; i++) if (this.fieldSets[i][fld]) {
 		for (var k in this.fieldSets[i]) flds[k] = this.fieldSets[i][k];
@@ -47,51 +65,64 @@ libVES.Object.prototype = {
 		var cls = self.fieldClass[fld];
 		flds[fld] = cls ? cls.prototype.fieldList : true;
 	    }
-	    var req = this.id ? this.id.then(function(id) { return self.VES.get(self.apiUri + '/' + id,flds); }) : self.postData().then(function(data) {
-		return self.VES.post(self.apiUri,data,flds);
-	    }).then(function(data) {
-		if (data.id) {
-		    self.id = Promise.resolve(data.id);
-		    self.fieldUpdate = {id: true};
-		}
-		return data;
-	    });
-	    for (var k in flds) if (this[k] === undefined) {
-		this[k] = req.then((function(fld) {
-		    var cls = self.fieldClass[fld];
-		    return function(data) {
-			if (cls && data[fld]) return ((data[fld] instanceof Array) ? data[fld].map(function(v) {
-			    return new cls(v,self.VES);
-			}) : new cls(data[fld],self.VES));
-			return data[fld];
-		    };
-		})(k));
-	    }
+	    this.loadFields(flds,force);
 	}
 	return this[fld];
+    },
+    loadFields: function(flds,force,optns) {
+	var self = this;
+	var req = this.id ? this.id.then(function(id) { return self.VES.get(self.apiUri + '/' + id,flds,optns); }) : self.postData().then(function(data) {
+	    return self.VES.post(self.apiUri,data,flds,optns);
+	}).then(function(data) {
+	    if (data.id) {
+		self.id = Promise.resolve(data.id);
+		self.fieldUpdate = {id: true};
+	    }
+	    return data;
+	});
+	for (var k in flds) if (force || this[k] === undefined) {
+	    this[k] = req.then((function(fld) {
+		var cls = self.fieldClass[fld];
+		return function(data) {
+		    if (cls && data[fld]) return ((data[fld] instanceof Array) ? data[fld].map(function(v) {
+			return new cls(v,self.VES);
+		    }) : new cls(data[fld],self.VES));
+		    return data[fld];
+		};
+	    })(k));
+	}
     },
     reset: function() {
 	for (var k in this.fieldClass) delete(this[k]);
 	return Promise.resolve();
     },
     getId: function() {
-	return this.id != null ? Promise.resolve(this.id) : Promise.reject(new libVES.Error('InvalidVaule',"id is null"));
+	return this.id ? Promise.resolve(this.id) : this.getField('id');
     },
-    postData: function(fields) {
+    postData: function(path,fields) {
+	if (this.postDataPath) {
+	    return Promise.resolve({"$ref":'#/' + this.postDataPath.join('/')});
+	}
+	if (!path) path = [];
+	this.postDataPath = path;
 	var data = {};
 	var prs = [];
 	var self = this;
-	var fmt = function(v,a) {
-	    if (v instanceof libVES.Object) return v.postData(a);
-	    else if (v instanceof Array) return Promise.all(v.map(function(vv) {
-		return fmt(vv,a);
+	var fmt = function(v,a,p) {
+	    var l = p.length;
+	    if (v instanceof libVES.Object) return v.postData(p,a);
+	    else if (v instanceof Array) return Promise.all(v.map(function(vv,i) {
+		p[l] = i;
+		return fmt(vv,a,p);
 	    }));
 	    else return v;
 	};
 	var pf = function(k,pr,a) {
-	    if (!(pr instanceof Promise)) pr = fmt(pr,a);
+	    var p = path.slice();
+	    p[p.length] = k;
+	    if (!(pr instanceof Promise)) pr = fmt(pr,a,p);
 	    if (pr instanceof Promise) prs.push(pr.then(function(pr2) {
-		return Promise.resolve(fmt(pr2,a)).then(function(v) {
+		return Promise.resolve(fmt(pr2,a,p)).then(function(v) {
 		    data[k] = v;
 		});
 	    }));
@@ -100,6 +131,7 @@ libVES.Object.prototype = {
 	if (!(fields instanceof Object)) fields = this.fieldUpdate;
 	if (fields) for (var k in fields) if (this[k] !== undefined) pf(k,this[k],fields[k]);
 	return Promise.all(prs).then(function() {
+	    self.postDataPath = null;
 	    return data;
 	});
     },
@@ -197,6 +229,12 @@ libVES.User.prototype = new libVES.Object({
 	return this.getField('vaultKeys');
     },
     getActiveVaultKeys: function() {
+	var self = this;
+	if (!this.activeVaultKeys && (this.currentVaultKey || this.shadowVaultKey)) return this.getCurrentVaultKey().then(function(curr) {
+	    return curr ? self.getShadowVaultKey().then(function(sh) {
+		return sh ? [curr,sh] : [curr];
+	    }) : [];
+	});
 	return this.getField('activeVaultKeys');
     },
     getCurrentVaultKey: function() {
@@ -417,48 +455,15 @@ libVES.VaultKey.prototype = new libVES.Object({
 		}));
 	    });
 	}));
-	return self;
+	return Promise.resolve(self);
     },
     getRecovery: function() {
 	var self = this;
 	return self.getType().then(function(t) {
 	    switch (t) {
-		case 'shadow': case 'recovery': return self.getVaultItems().then(function(vis) {
-		    var frnds = {};
-		    return self.getUser().then(function(my_u) {
-			return my_u.getId().then(function(my_uid) {
-			    return Promise.all(vis.map(function(vi) {
-				var frnd = {vaultItem: vi};
-				return Promise.all([
-				    vi.getVaultEntries().then(function(ves) {
-					return Promise.all(ves.map(function(ve) {
-					    return new libVES.VaultKey(ve.vaultKey,self.VES).getUser().then(function(u) {
-						return u.getId().then(function(uid) {
-						    if (uid == my_uid) frnd.assist = true;
-						    else {
-							frnd.user = u;
-							frnds[uid] = frnd;
-						    }
-						});
-					    });
-					}));
-				    }),
-				    vi.getMeta().then(function(meta) {
-					frnd.meta = meta;
-				    }),
-				    vi.get().then(function(data) {
-					frnd.data = data;
-				    }).catch(function(){})
-				]);
-			    }));
-			});
-		    }).then(function() {
-			var rs = [];
-			for (var id in frnds) rs.push(frnds[id]);
-			return {tokens: rs};
-		    });
-		});
-		default: throw new libVES.Error('InvalidValue','Recovery info is applicable for key type shadow or recovery');
+		case 'shadow': case 'recovery':
+		    return new libVES.Recovery(self);
+		default: throw new libVES.Error('InvalidValue','Recovery is not applicable for VaultKey type ' + t);
 	    }
 	});
     }
@@ -571,7 +576,19 @@ libVES.VaultItem.Type = {
 	},
 	build: function(data) {
 	    if (!(data instanceof libVES.Cipher)) throw new libVES.Error('InvalidData',"Content of a VaultItem type 'file' must be libVES.Cipher");
-	    return ci.serialize();
+	    return data.serialize();
+	}
+    },
+    secret: {
+	parse: function(buf) {
+	    var self = this;
+	    return this.getMeta().then(function(meta) {
+		return {data: buf, meta: meta};
+	    });
+	},
+	build: function(data) {
+	    this.setField('meta',data.meta);
+	    return data.data;
 	}
     }
 };
