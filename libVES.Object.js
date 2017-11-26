@@ -369,7 +369,7 @@ libVES.VaultKey.prototype = new libVES.Object({
 	    return true;
 	});
     },
-    unlockPub: function() {
+    getPublicCryptoKey: function() {
 	if (!this.wcPub) {
 	    var self = this;
 	    self.wcPub = this.engine().then(function(e) {
@@ -416,7 +416,7 @@ libVES.VaultKey.prototype = new libVES.Object({
     encrypt: function(ptxt) {
 	var self = this;
 	return self.engine().then(function(e) {
-	    return self.unlockPub().then(function(k) {
+	    return self.getPublicCryptoKey().then(function(k) {
 		return e.encrypt(k,ptxt).then(function(ctxt) {
 		    return libVES.Util.ByteArrayToB64(ctxt);
 		});

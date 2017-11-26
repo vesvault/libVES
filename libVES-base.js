@@ -215,10 +215,10 @@ libVES.prototype = {
 	    });
 	});
     },
-    setVESkey: function(veskey,lost) {
+    setVESkey: function(veskey,lost,options) {
 	var self = this;
 	return this.me().then(function(me) {
-	    return (new libVES.VaultKey({type: 'current', algo: self.keyAlgo, user: me},self)).generate(Promise.resolve(veskey)).then(function(k) {
+	    return (new libVES.VaultKey({type: 'current', algo: self.keyAlgo, user: me},self)).generate(Promise.resolve(veskey),options).then(function(k) {
 		return self.getVaultKey().then(function(cur) {
 		    var r = k.rekeyFrom(cur);
 		    me.currentVaultKey = me.vaultKeys = me.activeVaultKeys = undefined;
