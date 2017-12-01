@@ -6,7 +6,9 @@
  */
 if (!window.libVES) window.libVES = function(optns) {
     for (var k in optns) this[k] = optns[k];
-    if (!(this.token || this.login || (this.domain && this.externalId))) throw new libVES.Error('InvalidValue','Required parameters: token || login || (domain && externalId)');
+    if (this.domain && this.externalId != null) this.type = 'secondary';
+    else if (this.user) this.type = 'primary';
+    else throw new libVES.Error('InvalidValue','Required parameters: user || (domain && externalId)');
     this.unlockedKeys = {};
 }
 
@@ -94,8 +96,15 @@ libVES.prototype = {
 	return this.userMe;
     },
     unlock: function(veskey) {
-	return this.me().then(function(me) {
-	    return me.unlock(Promise.resolve(veskey));
+	var self = this;
+	return this.getVaultKey().then(function(vkey) {
+	    return vkey.unlock(Promise.resolve(veskey)).then(function(cryptoKey) {
+		if (!self.token && self.type == 'secondary') return vkey.getSessionToken().then(function(tkn) {
+		    self.token = tkn;
+		    return cryptoKey;
+		});
+		return cryptoKey;
+	    });
 	});
     },
     lock: function() {
@@ -114,9 +123,19 @@ libVES.prototype = {
 	return Promise.resolve(val);
     },
     getVaultKey: function() {
-	return this.me().then(function(me) {
-	    return me.getCurrentVaultKey();
-	});
+	var self = this;
+	switch (this.type) {
+	    case 'primary': return this.me().then(function(me) {
+		return me.getCurrentVaultKey();
+	    });
+	    case 'secondary': return (this.vaultKey || (this.vaultKey = this.prepareExternals({externalId: self.externalId}).then(function(ext) {
+		var vKey = new libVES.VaultKey({type: 'secondary', externals: ext},self);
+		return vKey.getField('encSessionToken').then(function(tk) {
+		    return vKey;
+		});
+	    })));
+	    default: throw new libVES.Error('Internal','Invalid libVES.type: ' + this.type);
+	}
     },
     getShadowKey: function() {
 	return this.me().then(function(me) {
@@ -248,9 +267,9 @@ libVES.prototype = {
     setSecondaryKey: function(ext,veskey,optns) {
 	var self = this;
 	return this.prepareExternals(ext).then(function(ext) {
-	    console.log(new libVES.VaultKey({externals: ext},self.VES).getId().then(function(id) {
-		window.alert(id);
-	    }));
+//	    console.log(new libVES.VaultKey({externals: ext},self.VES).getId().then(function(id) {
+//		window.alert(id);
+//	    }));
 	    if (!veskey) veskey = self.generateVESkey();
 	    return self.me().then(function(me) {
 		return (new libVES.VaultKey({type: 'secondary', algo: self.keyAlgo, user: me, externals: ext},self)).generate(veskey,optns).then(function(k) {

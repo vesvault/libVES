@@ -26,7 +26,7 @@ libVES.Recovery.prototype = {
 					    return Promise.all(ves.map(function(ve) {
 						return new libVES.VaultKey(ve.vaultKey,self.VES).getUser().then(function(u) {
 						    return u.getId().then(function(uid) {
-							if (uid == my_uid) frnd.assist = true;
+							if (uid == my_uid) frnd.assisted = true;
 							else {
 							    frnd.user = u;
 							    frnds[uid] = frnd;
@@ -56,6 +56,16 @@ libVES.Recovery.prototype = {
 	    }
 	});
     },
+    requireOwner: function() {
+	return Promise.all(this.vaultKey.getUser(),this.vaultKey.libVES.me()).then(function(usrs) {
+	    return Promise.all(usrs.map(function(v,i) {
+		return v.getId();
+	    })).then(function(uids) {
+		if (uids[0] == uids[1]) return true;
+		throw new libVES.Error('InvalidValue','Not an owner of the VESrecovery');
+	    });
+	});
+    },
     getFriends: function() {
 	return this.getTokens().then(function(tkns) {
 	    return tkns.map(function(v,i) {
@@ -63,25 +73,23 @@ libVES.Recovery.prototype = {
 	    });
 	});
     },
-    getMyToken: function() {
+    getFriendInfo: function(user) {
+	var self = this;
 	return this.getTokens().then(function(tkns) {
-	    return self.vaultKey.getUser().then(function(user) {
-		return self.vaultKey.libVES.me().then(function(me) {
-		    return Promise.all([user.getId(),me.getId()]).then(function(ids) {
-			if (ids[0] == ids[1]) throw new libVES.Error('InvalidValue','Cannot assist yourself');
-			var rs = Promise.reject(new libVES.Error('InvalidValue','Assistance is not possible'));
-			for (var i = 0; i < tkns.length; i++) rs = (function(tkn) {
-			    return rs.catch(function(e) {
-				return tkn.user.getId().then(function(uid) {
-				    if (uid == ids[0]) return tkn;
-				    throw e;
-				});
-			    });
-			})(tkns[i]);
-			return rs;
-		    });
+	    return Promise.resolve(tkns.map(function(v,i) {
+		return v.user.getId();
+	    })).then(function(uids) {
+		return user.getId().then(function(uid) {
+		    for (var i = 0; i < uids.length; i++) if (uids[i] == uid) return tkns[i];
+		    throw new libVES.Error('InvalidValue','Not a friend: ' + uid);
 		});
 	    });
+	});
+    },
+    getMyToken: function() {
+	var self = this;
+	return self.vaultKey.libVES.me().then(function(me) {
+	    return self.getFriendInfo(me);
 	});
     },
     getFriendsTotal: function() {
@@ -157,5 +165,12 @@ libVES.Recovery.prototype = {
 		});
 	    });
 	});
+    },
+    recover: function() {
+	var self = this;
+	if (!this.recovery) this.recovery = this.requireOwner().then(function() {
+	    return self._recover();
+	});
+	return this.recovery;
     }
 };

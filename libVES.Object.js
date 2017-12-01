@@ -466,6 +466,13 @@ libVES.VaultKey.prototype = new libVES.Object({
 		default: throw new libVES.Error('InvalidValue','Recovery is not applicable for VaultKey type ' + t);
 	    }
 	});
+    },
+    getSessionToken: function() {
+	return this.getField('encSessionToken').then(function(tk) {
+	    return self.decrypt(tk).then(function(b) {
+		return libVES.Util.ByteArrayToString(b);
+	    });
+	});
     }
 });
 
