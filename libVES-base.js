@@ -5,6 +5,12 @@
  * GPL license, http://www.gnu.org/licenses/
  */
 if (!window.libVES) window.libVES = function(optns) {
+    try {
+	if (!window.crypto.subtle.digest) throw new libVES.Error('Init','crypto.subtle is improperly implemented?');
+    } catch (e) {
+	if (e instanceof libVES.Error) throw e;
+	throw new libVES.Error('Init','crypto.subtle is not usable' + (document.location.protocol.match(/https/) ? '' : ' (try https?)'));
+    }
     for (var k in optns) this[k] = optns[k];
     if (this.domain && this.externalId != null) this.type = 'secondary';
     else if (this.user) this.type = 'primary';
@@ -48,8 +54,8 @@ libVES.prototype = {
 	    };
 	    if (body != null) xhr.setRequestHeader('Content-Type','application/json');
 	    xhr.setRequestHeader('Accept','application/json');
-	    if (this.token) xhr.setRequestHeader('Authorization','Bearer ' + this.token);
-	    else if (this.user && optns.passwd) xhr.setRequestHeader('Authorization','Basic ' + btoa(this.user + ':' + optns.passwd));
+	    if (this.user && optns.passwd) xhr.setRequestHeader('Authorization','Basic ' + btoa(this.user + ':' + optns.passwd));
+	    else if (this.token) xhr.setRequestHeader('Authorization','Bearer ' + this.token);
 	    xhr.responseType = 'json';
 	    xhr.send(body);
 	}.bind(this));
@@ -267,9 +273,6 @@ libVES.prototype = {
     setSecondaryKey: function(ext,veskey,optns) {
 	var self = this;
 	return this.prepareExternals(ext).then(function(ext) {
-//	    console.log(new libVES.VaultKey({externals: ext},self.VES).getId().then(function(id) {
-//		window.alert(id);
-//	    }));
 	    if (!veskey) veskey = self.generateVESkey();
 	    return self.me().then(function(me) {
 		return (new libVES.VaultKey({type: 'secondary', algo: self.keyAlgo, user: me, externals: ext},self)).generate(veskey,optns).then(function(k) {
@@ -322,6 +325,31 @@ libVES.prototype = {
 	    });
 	});
     },
+    getFile: function(fileRef) {
+	var self = this;
+	return self.prepareExternals(fileRef).then(function(ext) {
+	    new libVES.File({externals: ext},self);
+	});
+    },
+    getFileItem: function(fileRef) {
+	var self = this;
+	return new libVES.VaultItem({file: self.getFile(fileRef)},self);
+    },
+    getValue: function(fileRef) {
+	return this.getFileItem(fileRef).then(function(vaultItem) {
+	    return vaultItem.get();
+	});
+    },
+    putValue: function(fileRef,value,shareWith) {
+	return this.getFileItem(fileRef).then(function(vaultItem) {
+	    
+	});
+    },
+    deleteFile: function(fileRef) {
+	return this.getFile(fileRef).then(function(file) {
+	    return file.delete();
+	});
+    },
     shareTempKeys: function() {
 	var self = this;
 	return self.me().then(function(me) {
@@ -363,6 +391,37 @@ libVES.prototype = {
 			}
 		    });
 		}));
+	    });
+	});
+    },
+    getMyRecoveries: function() {
+	return this.getVaultKeys().then(function(vaultKeys) {
+	    return Promise.all(vaultKeys.map(function(e,i) {
+		return e.getType();
+	    })).then(function(types) {
+		var rs = [];
+		for (var i = 0; i < types.length; i++) switch (types[i]) {
+		    case 'recovery': case 'shadow':
+			rs.push(vaultKeys[i].getRecovery());
+		}
+		return Promise.all(rs);
+	    });
+	});
+    },
+    getFriendsRecoveries: function() {
+	var self = this;
+	return self.me().then(function(me) {
+	    return me.getFriendsVaultKeys().then(function(vaultKeys) {
+		return Promise.all(vaultKeys.map(function(e,i) {
+		    return e.getType();
+		})).then(function(types) {
+		    var rs = [];
+		    for (var i = 0; i < types.length; i++) switch (types[i]) {
+			case 'recovery': case 'shadow':
+			    rs.push(vaultKeys[i].getRecovery());
+		    }
+		    return Promise.all(rs);
+		});
 	    });
 	});
     },

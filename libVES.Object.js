@@ -72,6 +72,7 @@ libVES.Object.prototype = {
     loadFields: function(flds,force,optns) {
 	var self = this;
 	var req = this.id ? this.id.then(function(id) { return self.VES.get(self.apiUri + '/' + id,flds,optns); }) : self.postData().then(function(data) {
+	    data['$op'] = 'fetch';
 	    return self.VES.post(self.apiUri,data,flds,optns);
 	}).then(function(data) {
 	    if (data.id) {
@@ -449,7 +450,7 @@ libVES.VaultKey.prototype = new libVES.Object({
 		    }).catch(function(e) {
 			return {
 			    vaultItem: {id: ve.vaultItem.id},
-			    ".op": "ignore"
+			    "$op": "ignore"
 			};
 		    });
 		}));
