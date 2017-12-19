@@ -395,17 +395,20 @@ libVES.prototype = {
 	});
     },
     getMyRecoveries: function() {
-	return this.getVaultKeys().then(function(vaultKeys) {
-	    return Promise.all(vaultKeys.map(function(e,i) {
-		return e.getType();
-	    })).then(function(types) {
-		var rs = [];
-		for (var i = 0; i < types.length; i++) switch (types[i]) {
-		    case 'recovery': case 'shadow':
-			rs.push(vaultKeys[i].getRecovery());
-		}
-		return Promise.all(rs);
-	    });
+		var self = this;
+	return self.me().then(function(me) {
+	    return me.getVaultKeys().then(function(vaultKeys) {
+			return Promise.all(vaultKeys.map(function(e,i) {
+				return e.getType();
+			})).then(function(types) {
+				var rs = [];
+				for (var i = 0; i < types.length; i++) switch (types[i]) {
+					case 'recovery': case 'shadow':
+					rs.push(vaultKeys[i].getRecovery());
+				}
+				return Promise.all(rs);
+			});
+		});
 	});
     },
     getFriendsRecoveries: function() {

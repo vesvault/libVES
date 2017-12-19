@@ -71,7 +71,7 @@ libVES.Object.prototype = {
     },
     loadFields: function(flds,force,optns) {
 	var self = this;
-	var req = this.id ? this.id.then(function(id) { return self.VES.get(self.apiUri + '/' + id,flds,optns); }) : self.postData().then(function(data) {
+	var req = this.id ? this.id.then(function(id) {  return self.VES.get(self.apiUri + '/' + id,flds,optns); }) : self.postData().then(function(data) {
 	    data['$op'] = 'fetch';
 	    return self.VES.post(self.apiUri,data,flds,optns);
 	}).then(function(data) {
