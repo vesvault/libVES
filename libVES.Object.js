@@ -208,7 +208,7 @@ libVES.User.prototype = new libVES.Object({
     apiUri: 'users',
     fieldList: {id: true, email: true, type: true, firstName: true, lastName: true},
     fieldExtra: {vaultKeys: true, activeVaultKeys: true, currentVaultKey: true},
-    fieldClass: {vaultKeys: libVES.VaultKey, activeVaultKeys: libVES.VaultKey, currentVaultKey: libVES.VaultKey, shadowVaultKey: libVES.VaultKey},
+    fieldClass: {vaultKeys: libVES.VaultKey, activeVaultKeys: libVES.VaultKey, currentVaultKey: libVES.VaultKey, shadowVaultKey: libVES.VaultKey, friendsVaultKeys: libVES.VaultKey},
     getEmail: function() {
 	return this.getField('email');
     },
@@ -237,6 +237,9 @@ libVES.User.prototype = new libVES.Object({
 	    }) : [];
 	});
 	return this.getField('activeVaultKeys');
+    },
+    getFriendsVaultKeys: function() {
+	return this.getField('friendsVaultKeys');
     },
     getCurrentVaultKey: function() {
 /*
