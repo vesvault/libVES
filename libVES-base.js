@@ -252,6 +252,8 @@ libVES.prototype = {
 		    return k.post();
 		}).then(function(post) {
 		    return self.reset(post);
+		}).then(function() {
+		    return self.getVaultKey();
 		});
 	    });
 	});
@@ -341,8 +343,13 @@ libVES.prototype = {
 	});
     },
     putValue: function(fileRef,value,shareWith) {
+	var self = this;
 	return this.getFileItem(fileRef).then(function(vaultItem) {
-	    
+	    return Promise.resolve(shareWith || vaultItem.getShareList().catch(function(e) {
+		return self.prepareExternals(fileRef);
+	    })).then(function(shareWith) {
+		return vaultItem.shareWith(shareWith,value);
+	    });
 	});
     },
     deleteFile: function(fileRef) {
