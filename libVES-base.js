@@ -330,12 +330,14 @@ libVES.prototype = {
     getFile: function(fileRef) {
 	var self = this;
 	return self.prepareExternals(fileRef).then(function(ext) {
-	    new libVES.File({externals: ext},self);
+	    return new libVES.File({externals: ext},self);
 	});
     },
     getFileItem: function(fileRef) {
 	var self = this;
-	return new libVES.VaultItem({file: self.getFile(fileRef)},self);
+	return self.getFile(fileRef).then(function(file) {
+	    return new libVES.VaultItem({file: file},self);
+	});
     },
     getValue: function(fileRef) {
 	return this.getFileItem(fileRef).then(function(vaultItem) {
