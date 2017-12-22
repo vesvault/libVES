@@ -14,7 +14,7 @@ libVES.Recovery.prototype = {
 	var self = this;
 	return this.tokens = self.vaultKey.getType().then(function(t) {
 	    switch (t) {
-		case 'shadow': case 'recovery': return self.getVaultItems().then(function(vis) {
+		case 'shadow': case 'recovery': return self.vaultKey.getVaultItems().then(function(vis) {
 		    var frnds = {};
 		    var fn = function() {
 			return self.vaultKey.getUser().then(function(my_u) {
@@ -24,7 +24,7 @@ libVES.Recovery.prototype = {
 				    return Promise.all([
 					vi.getVaultEntries().then(function(ves) {
 					    return Promise.all(ves.map(function(ve) {
-						return new libVES.VaultKey(ve.vaultKey,self.VES).getUser().then(function(u) {
+						return new libVES.VaultKey(ve.vaultKey,self.vaultKey.VES).getUser().then(function(u) {
 						    return u.getId().then(function(uid) {
 							if (uid == my_uid) frnd.assisted = true;
 							else {
@@ -79,10 +79,10 @@ libVES.Recovery.prototype = {
 	    return Promise.resolve(tkns.map(function(v,i) {
 		return v.user.getId();
 	    })).then(function(uids) {
-		return user.getId().then(function(uid) {
-		    for (var i = 0; i < uids.length; i++) if (uids[i] == uid) return tkns[i];
-		    throw new libVES.Error('InvalidValue','Not a friend: ' + uid);
-		});
+			return user.getId().then(function(uid) {
+				for (var i = 0; i < uids.length; i++) if (uids[i] == uid) return tkns[i];
+				throw new libVES.Error('InvalidValue','Not a friend: ' + uid);
+			});
 	    });
 	});
     },
@@ -106,7 +106,7 @@ libVES.Recovery.prototype = {
 	var self = this;
 	return this.getTokens().then(function(tkns) {
 	    return Promise.all(tkns.map(function(v,i) {
-		return v.getVaultEntries().then(function() {
+		return v.vaultItem.getVaultEntries().then(function() {
 		    return v.vaultEntryByKey;
 		});
 	    })).then(function(ves) {
@@ -114,7 +114,7 @@ libVES.Recovery.prototype = {
 		    return user.getCurrentVaultKey().then(function(vk) {
 			return vk.getId().then(function(vkid) {
 			    var rs = 0;
-			    for (var i = 0; i < ves.length; i++) if (ves[i][vkid]) rs++;
+			    for (var i = 0; i < ves.length; i++) if (ves[i]) if(ves[i][vkid]) rs++;
 			    return rs;
 			});
 		    });
