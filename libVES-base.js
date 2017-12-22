@@ -180,22 +180,46 @@ libVES.prototype = {
     usersToKeys: function(users) {
 	var self = this;
 	return Promise.all(users.map(function(u) {
-	    var req;
-	    if (typeof(u) == 'string' && u.match(/^\S+\@\S+$/)) req = {email: u};
-	    else if (typeof(u) == 'object') {
+	    if (typeof(u) == 'object') {
 		if (u instanceof libVES.User) return self.getUserKeys(u);
-		req = u;
-	    } else throw new libVES.Error('BadUser',"Cannot match user: " + u,{value: u});
-	    var usr = new libVES.User(req,self);
-	    return self.getUserKeys(usr);
+		else if (u.domain != null || u.externalId != null) return self._matchSecondaryKey(u,u.user).then(function(vkey) {
+		    return [vkey];
+		});
+	    }
+	    return self.getUserKeys(self._matchUser(u));
 	})).then(function(ks) {
 	    var rs = [];
 	    for (var i = 0; i < ks.length; i++) for (var j = 0; j < ks[i].length; j++) rs.push(ks[i][j]);
 	    return rs;
 	});
     },
+    _matchUser: function(u) {
+	if (typeof(u) == 'object') {
+	    if (u instanceof libVES.User) return u;
+	    else return new libVES.User(u,this);
+	} else if (typeof(u) == 'string' && u.match(/^\S+\@\S+$/)) return new libVES.User({email: u},this);
+	throw new libVES.Error('BadUser',"Cannot match user: " + u,{value: u});
+    },
+    _matchSecondaryKey: function(ext,user) {
+	var self = this;
+	return self.prepareExternals(ext).then(function(exts) {
+	    var vkey = new libVES.VaultKey({externals: exts},self)
+	    return vkey.getId().then(function() {
+		return vkey;
+	    }).catch(function(e) {
+		if (e.code == 'NotFound') {
+		    if (!user) throw new libVES.Error('NotFound','No matching secondary key (domain:' + exts[0].domain + ', externalId:' + exts[0].externalId + '). Supply "user" to create the temp key.');
+		} else throw e;
+		return self.createTempKey(user).then(function(vkey) {
+		    return vkey.setField('externals',exts).then(function() {
+			return vkey;
+		    });
+		});
+	    });
+	});
+    },
     getUserKeys: function(usr) {
-	console.log('getUserKeys',usr,usr.activeVaultKeys,usr.currentVaultKey,usr.shadowVaultKey);
+//	console.log('getUserKeys',usr,usr.activeVaultKeys,usr.currentVaultKey,usr.shadowVaultKey);
 	var self = this;
 	return usr.getActiveVaultKeys().then(function(keys) {
 	    if (!keys.length) return self.createTempKey(usr).then(function(k) {
@@ -264,12 +288,22 @@ libVES.prototype = {
 	return Promise.resolve(ext).then(function(ext) {
 	    if (!(ext instanceof Array)) ext = [ext];
 	    if (ext.length < 1) throw new libVES.Error('InvalidValue','External reference is required');
+	    var rs = [];
 	    for (var i = 0; i < ext.length; i++) {
-		if (typeof(ext[i]) != 'object') ext[i] = {externalId: ext[i]};
-		if (!ext[i].domain && !(ext[i].domain = self.domain)) throw new libVES.Error('InvalidValue','External reference: domain is required');
-		if (!ext[i].externalId) throw new libVES.Error('InvalidValue','External reference: externalId is required');
+		rs[i] = (typeof(ext[i]) == 'object') ? {externalId: ext[i].externalId, domain: ext[i].domain} : {externalId: ext[i]};
+		if (!rs[i].domain && !(rs[i].domain = self.domain)) throw new libVES.Error('InvalidValue','External reference: domain is required');
+		if (!rs[i].externalId) throw new libVES.Error('InvalidValue','External reference: externalId is required');
 	    }
-	    return ext;
+	    return rs;
+	});
+    },
+    getSecondaryKey: function(ext,force) {
+	var self = this;
+	return this.prepareExternals(ext).then(function(ext) {
+	    var vkey = new libVES.VaultKey({externals: ext},self);
+	    return vkey.getId().then(function(id) {
+		return vkey;
+	    });
 	});
     },
     setSecondaryKey: function(ext,veskey,optns) {
@@ -330,12 +364,14 @@ libVES.prototype = {
     getFile: function(fileRef) {
 	var self = this;
 	return self.prepareExternals(fileRef).then(function(ext) {
-	    new libVES.File({externals: ext},self);
+	    return new libVES.File({externals: ext},self);
 	});
     },
     getFileItem: function(fileRef) {
 	var self = this;
-	return new libVES.VaultItem({file: self.getFile(fileRef)},self);
+	return self.getFile(fileRef).then(function(file) {
+	    return new libVES.VaultItem({file: file},self);
+	});
     },
     getValue: function(fileRef) {
 	return this.getFileItem(fileRef).then(function(vaultItem) {
@@ -345,10 +381,17 @@ libVES.prototype = {
     putValue: function(fileRef,value,shareWith) {
 	var self = this;
 	return this.getFileItem(fileRef).then(function(vaultItem) {
-	    return Promise.resolve(shareWith || vaultItem.getShareList().catch(function(e) {
-		return self.prepareExternals(fileRef);
-	    })).then(function(shareWith) {
-		return vaultItem.shareWith(shareWith,value);
+	    return vaultItem.getType().then(function(type) {
+	    }).catch(function(e) {
+		return vaultItem.setField('type',libVES.VaultItem.Type._detect(value));
+	    }).then(function(type) {
+	        return Promise.resolve(shareWith || vaultItem.getShareList().catch(function(e) {
+		    return self.getSecondaryKey({domain: fileRef.domain}).then(function(vkey) {
+			return [vkey];
+		    });
+		})).then(function(shareWith) {
+		    return vaultItem.shareWith(shareWith,value);
+		});
 	    });
 	});
     },
