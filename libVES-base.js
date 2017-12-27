@@ -92,7 +92,7 @@ libVES.prototype = {
     },
     logout: function() {
 	this.token = undefined;
-	return Promise.resolve(true);
+	return this.lock();
     },
     me: function() {
 	var self = this;
@@ -114,19 +114,14 @@ libVES.prototype = {
 	});
     },
     lock: function() {
-	var pr = [];
-	for (var i in this.unlockedKeys) pr.push(this.unlockedKeys[i].then(function(k) {
-	    return k.lock();
-	}));
-	return Promise.all(pr);
+	this.unlockedKeys = {};
+	return Promise.resolve(true);
     },
     reset: function(val) {
-	if (this.userMe) return this.userMe.then(function(me) {
-	    return me.reset().then(function() {
-		return val;
-	    });
+	this.userMe = undefined;
+	return this.lock().then(function() {
+	    return val;
 	});
-	return Promise.resolve(val);
     },
     getVaultKey: function() {
 	var self = this;
@@ -147,6 +142,20 @@ libVES.prototype = {
 	return this.me().then(function(me) {
 	    return me.getShadowVaultKey();
 	});
+    },
+    getVaultKeysById: function() {
+	if (!this.vaultKeysById) this.vaultKeysById = this.me().then(function(me) {
+	    return me.getVaultKeys().then(function(vaultKeys) {
+		return Promise.all(vaultKeys.map(function(e,i) {
+		    return e.getId();
+		})).then(function(ids) {
+		    var rs = {};
+		    for (var i = 0; i < ids.length; i++) rs[ids[i]] = vaultKeys[i];
+		    return rs;
+		});
+	    });
+	});
+	return this.vaultKeysById;
     },
     getItems: function() {
 	var self = this;
@@ -203,16 +212,18 @@ libVES.prototype = {
     _matchSecondaryKey: function(ext,user) {
 	var self = this;
 	return self.prepareExternals(ext).then(function(exts) {
-	    var vkey = new libVES.VaultKey({externals: exts},self)
+	    var vkey = new libVES.VaultKey({externals: exts},self);
 	    return vkey.getId().then(function() {
 		return vkey;
 	    }).catch(function(e) {
 		if (e.code == 'NotFound') {
 		    if (!user) throw new libVES.Error('NotFound','No matching secondary key (domain:' + exts[0].domain + ', externalId:' + exts[0].externalId + '). Supply "user" to create the temp key.');
-		} else throw e;
-		return self.createTempKey(user).then(function(vkey) {
-		    return vkey.setField('externals',exts).then(function() {
-			return vkey;
+		}
+		return Promise.resolve(user).then(function(u) {
+		    return self.createTempKey(self._matchUser(u)).then(function(vkey) {
+			return vkey.setField('externals',exts).then(function() {
+			    return vkey;
+			});
 		    });
 		});
 	    });
@@ -383,7 +394,19 @@ libVES.prototype = {
 	return this.getFileItem(fileRef).then(function(vaultItem) {
 	    return vaultItem.getType().then(function(type) {
 	    }).catch(function(e) {
-		return vaultItem.setField('type',libVES.VaultItem.Type._detect(value));
+		return vaultItem.setField('type',libVES.VaultItem.Type._detect(value)).then(function() {
+		    return vaultItem.getFile().then(function(file) {
+			return file.getExternals().then(function(exts) {
+			    return exts[0].getDomain().then(function(domain) {
+				file.setField('path',libVES.loadModule(['Domain',domain]).then(function(mod) {
+				    return mod.defaultFilePath(file,exts[0]);
+				}).catch(function() {
+				    return '';
+				}));
+			    });
+			});
+		    });
+		});
 	    }).then(function(type) {
 	        return Promise.resolve(shareWith || vaultItem.getShareList().catch(function(e) {
 		    return self.getSecondaryKey({domain: fileRef.domain}).then(function(vkey) {

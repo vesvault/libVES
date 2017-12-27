@@ -347,22 +347,19 @@ libVES.VaultKey.prototype = new libVES.Object({
     },
     unlock: function(veskey) {
 	var self = this;
-	if (!this.wcPriv) return this.wcPriv = self.getId().then(function(id) {
-	    var wcp = self.engine().then(function(m) {
+	if (self.wcPriv) return self.wcPriv;
+	return self.getId().then(function(id) {
+	    if (!self.VES.unlockedKeys[id]) return self.VES.unlockedKeys[id] = self.engine().then(function(m) {
 		return self.resolveVESkey(veskey).then(function(v) {
 		    return self.getPrivateKey().then(function(prk) {
 			return m.import(prk,{password: v});
 		    });
 		});
 	    });
-	    self.VES.unlockedKeys[id] = wcp.then(function() {
-		return self;
+	    else return self.VES.unlockedKeys[id].catch(function(e) {
+		self.VES.unlockedKeys[id] = null;
+		return self.unlock(veskey);
 	    });
-	    return wcp;
-	});
-	else return self.wcPriv.catch(function(e) {
-	    self.wcPriv = null;
-	    return self.unlock(veskey);
 	});
     },
     lock: function() {
@@ -488,6 +485,29 @@ libVES.VaultItem.prototype = new libVES.Object({
     defaultCipher: 'AES256',
     getRaw: function() {
 	var self = this;
+	return self.VES.getVaultKeysById().then(function(vaultKeys) {
+	    var f = function(vaultEntries) {
+	        var i = 0;
+		var fn = function() {
+		    for (; i < vaultEntries.length; i++) {
+			var k,d;
+			if ((d = vaultEntries[i].encData) != null && (k = vaultKeys[vaultEntries[i].vaultKey.id])) {
+			    i++;
+			    return k.decrypt(d).catch(fn);
+			}
+		    }
+		    return Promise.reject(new libVES.Error('Invalid Key',"No unlocked key to decrypt the item"));
+//		    throw new libVES.Error('Invalid Key',"No unlocked key to decrypt the item");
+		};
+		return fn();
+	    };
+	    var vaultEntries = [];
+	    if (self.vaultEntryByKey) for (var k in self.vaultEntryByKey) vaultEntries.push(self.vaultEntryByKey[k]);
+	    return f(vaultEntries).catch(function() {
+		return self.getVaultEntries().then(f);
+	    });
+	});
+	
 	for (var kid in this.VES.unlockedKeys) if (this.vaultEntryByKey[kid]) {
 	    return this.VES.unlockedKeys[kid].then(function(k) {
 		return k.decrypt(self.vaultEntryByKey[kid].encData);
@@ -603,7 +623,7 @@ libVES.VaultItem.Type = {
 	    return libVES.Util.ByteArrayToString(buf);
 	},
 	build: function(data) {
-	    return libVES.Util.StringToByteArray(data);
+	    return libVES.Util.StringToByteArray(String(data));
 	}
     },
     file: {
@@ -636,7 +656,11 @@ libVES.VaultItem.Type.password = libVES.VaultItem.Type.string;
 
 libVES.File.prototype = new libVES.Object({
     apiUri: 'files',
-    fieldList: {id: true}
+    fieldList: {id: true},
+    fieldClass: {externals: libVES.External},
+    getExternals: function() {
+	return this.getField('externals');
+    }
 });
 
 libVES.External.prototype = new libVES.Object({

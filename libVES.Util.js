@@ -74,7 +74,7 @@ libVES.Util = {
     },
     PEM: {
 	toDER: function(pem) {
-	    var pp = pem.match(/-----BEGIN.*?\n([A-Za-z0-9\/\+\=\s\r\n]*)-----END/);
+	    var pp = pem.match(/-----BEGIN.*?\n([A-Za-z0-9\/\+\=\s\r\n]*)-----END/s);
 	    if (!pp) throw new libVES.Error('Internal','PEM formatted key expected');
 	    return new Uint8Array(libVES.Util.B64ToByteArray(pp[1]));
 	},
