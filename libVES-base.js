@@ -190,7 +190,9 @@ libVES.prototype = {
 	var self = this;
 	return Promise.all(users.map(function(u) {
 	    if (typeof(u) == 'object') {
-		if (u instanceof libVES.User) return self.getUserKeys(u);
+		if (u instanceof libVES.VaultKey) return [u];
+		else if (u instanceof libVES.External) return [new libVES.VaultKey({externals:[u]},self)];
+		else if (u instanceof libVES.User) return self.getUserKeys(u);
 		else if (u.domain != null || u.externalId != null) return self._matchSecondaryKey(u,u.user).then(function(vkey) {
 		    return [vkey];
 		});
@@ -216,9 +218,12 @@ libVES.prototype = {
 	    return vkey.getId().then(function() {
 		return vkey;
 	    }).catch(function(e) {
-		if (e.code == 'NotFound') {
-		    if (!user) throw new libVES.Error('NotFound','No matching secondary key (domain:' + exts[0].domain + ', externalId:' + exts[0].externalId + '). Supply "user" to create the temp key.');
-		}
+		if (e.code != 'NotFound') throw e;
+		if (!user) user = libVES.getModule(libVES.Domain,exts[0].domain).then(function(dom) {
+		    return dom.vaultRefsToUser(exts);
+		}).catch(function(e) {
+		    throw new libVES.Error('NotFound','No matching secondary key (domain:' + exts[0].domain + ', externalId:' + exts[0].externalId + '). Supply "user" to create the temp key, or define libVES.Domain.' + exts[0].domain + '.vaultRefsToUser(vaultRefs) to return matching libVES.User',{error: e});
+		});
 		return Promise.resolve(user).then(function(u) {
 		    return self.createTempKey(self._matchUser(u)).then(function(vkey) {
 			return vkey.setField('externals',exts).then(function() {
@@ -398,7 +403,7 @@ libVES.prototype = {
 		    return vaultItem.getFile().then(function(file) {
 			return file.getExternals().then(function(exts) {
 			    return exts[0].getDomain().then(function(domain) {
-				file.setField('path',libVES.loadModule(['Domain',domain]).then(function(mod) {
+				file.setField('path',libVES.getModule(libVES.Domain,domain).then(function(mod) {
 				    return mod.defaultFilePath(file,exts[0]);
 				}).catch(function() {
 				    return '';
@@ -589,3 +594,5 @@ libVES.getModuleFunc = function(sectn,mod,then) {
 libVES.loadModule = function(sectn,mod) {
     return Promise.reject(new libVES.Error('Internal',"Cannot load " + sectn + '.' + mod));
 };
+
+if (!libVES.Domain) libVES.Domain = {};

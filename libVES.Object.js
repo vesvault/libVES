@@ -341,7 +341,7 @@ libVES.VaultKey.prototype = new libVES.Object({
 		    };
 		    return f(vis);
 		});
-	    default: console.log(self); throw new libVES.Error('InvalidKey','Cannot unlock the key');
+	    default: throw new libVES.Error('InvalidKey','Cannot unlock the key',{vaultKey: self});
 	    }
 	});
     },
@@ -496,8 +496,7 @@ libVES.VaultItem.prototype = new libVES.Object({
 			    return k.decrypt(d).catch(fn);
 			}
 		    }
-		    return Promise.reject(new libVES.Error('Invalid Key',"No unlocked key to decrypt the item"));
-//		    throw new libVES.Error('Invalid Key',"No unlocked key to decrypt the item");
+		    return Promise.reject(new libVES.Error('Invalid Key',"No unlocked key to decrypt the item",{vaultItem: self}));
 		};
 		return fn();
 	    };
@@ -507,16 +506,6 @@ libVES.VaultItem.prototype = new libVES.Object({
 		return self.getVaultEntries().then(f);
 	    });
 	});
-	
-	for (var kid in this.VES.unlockedKeys) if (this.vaultEntryByKey[kid]) {
-	    return this.VES.unlockedKeys[kid].then(function(k) {
-		return k.decrypt(self.vaultEntryByKey[kid].encData);
-	    });
-	}
-	if (!this.vaultEntries) return this.getVaultEntries().then(function(ves) {
-	    return self.getRaw();
-	});
-	return Promise.reject(new libVES.Error('InvalidKey',"No unlocked key to decrypt the item"));
     },
     get: function() {
 	var self = this;
@@ -583,12 +572,44 @@ libVES.VaultItem.prototype = new libVES.Object({
 	    return self;
 	});
     },
+    getShareVaultKeys: function() {
+	var self = this;
+	return this.getVaultEntries().then(function(vaultEntries) {
+	    return vaultEntries.map(function(e,i) {
+		return new libVES.VaultKey(e.vaultKey,self.VES);
+	    });
+	});
+    },
     getShareList: function() {
+	var self = this;
+	return this.getShareVaultKeys().then(function(vaultKeys) {
+	    var uids = {};
+	    return Promise.all(vaultKeys.map(function(e,i) {
+		return e.getExternals().then(function(exts) {
+		    if (exts && exts.length) return exts[0];
+		    return e.getUser().then(function(u) {
+			return u.getId().then(function(uid) {
+			    if (uids[uid]) return null;
+			    uids[uid] = true;
+			    return u;
+			});
+		    });
+		});
+	    })).then(function(lst) {
+		var rs = [];
+		for (var i = 0; i < lst.length; i++) if (lst[i]) rs.push(lst[i]);
+		return rs;
+	    });
+	});
+    }
+/*
+    getShareList: function() {
+	var self = this;
 	return this.getVaultEntries().then(function(vaultEntries) {
 	    var vaultKeys = vaultEntries.map(function(e,i) {
-		return new libVES.VaultKey({id: e.vaultKey.id},self.VES);
+		return new libVES.VaultKey(e.vaultKey,self.VES);
 	    });
-	    return Promise.resolve(vaultKeys.map(function(e,i) {
+	    return Promise.all(vaultKeys.map(function(e,i) {
 		return e.getExternals();
 	    })).then(function(extArray) {
 		var rs = [];
@@ -610,6 +631,7 @@ libVES.VaultItem.prototype = new libVES.Object({
 	    });
 	});
     }
+*/
 });
 libVES.VaultItem.Type = {
     _detect: function(data) {
