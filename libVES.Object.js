@@ -469,6 +469,7 @@ libVES.VaultKey.prototype = new libVES.Object({
 	});
     },
     getSessionToken: function() {
+	var self = this;
 	return this.getField('encSessionToken').then(function(tk) {
 	    return self.decrypt(tk).then(function(b) {
 		return libVES.Util.ByteArrayToString(b);
