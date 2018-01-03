@@ -285,11 +285,18 @@ libVES.prototype = {
 	return this.me().then(function(me) {
 	    return (new libVES.VaultKey({type: 'current', algo: self.keyAlgo, user: me},self)).generate(Promise.resolve(veskey),options).then(function(k) {
 		return self.getVaultKey().then(function(cur) {
-		    var r = k.rekeyFrom(cur);
-		    me.currentVaultKey = me.vaultKeys = me.activeVaultKeys = undefined;
-		    return r;
-		}).then(function(k) {
-		    return k.post();
+		    var r;
+		    if (cur)
+			if (lost) r = cur.setField('type','lost').then(function() {
+			    return me.setField('vaultKeys',[cur,k]).then(function() {
+				return me;
+			    });
+			});
+			else r = k.rekeyFrom(cur);
+		    } else r = k;
+		    me.currentVaultKey = me.activeVaultKeys = undefined;
+		    if (!cur || !lost) me.vaultKeys = undefined;
+		    return r.post();
 		}).then(function(post) {
 		    return self.reset(post);
 		}).then(function() {
@@ -319,6 +326,9 @@ libVES.prototype = {
 	    var vkey = new libVES.VaultKey({externals: ext},self);
 	    return vkey.getId().then(function(id) {
 		return vkey;
+	    }).catch(function(e) {
+		if (!force) throw e;
+		return self.setSecondaryKey(ext);
 	    });
 	});
     },
@@ -458,7 +468,7 @@ libVES.prototype = {
 			    case 'temp':
 				return vk.unlock().then(function() {
 				    return vk.getExternals().then(function(ex) {
-					return (ex.length ? self.getSecondaryKey(ex) : self.getCurrentKey()).then(function(curr) {
+					return (ex.length ? self.getSecondaryKey(ex,true) : self.getCurrentKey()).then(function(curr) {
 					    return curr.rekeyTo(vk).then(function() {
 					        return vk.delete();
 					    });
@@ -473,7 +483,7 @@ libVES.prototype = {
 	});
     },
     getMyRecoveries: function() {
-		var self = this;
+	var self = this;
 	return self.me().then(function(me) {
 	    return me.getVaultKeys().then(function(vaultKeys) {
 			return Promise.all(vaultKeys.map(function(e,i) {
