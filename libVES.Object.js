@@ -671,7 +671,7 @@ libVES.VaultItem.Type = {
 	},
 	build: function(data) {
 	    this.setField('meta',data.meta);
-	    return data.data;
+	    return data.value;
 	}
     }
 };

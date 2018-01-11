@@ -214,7 +214,7 @@ libVES.prototype = {
     _matchSecondaryKey: function(ext,user) {
 	var self = this;
 	return self.prepareExternals(ext).then(function(exts) {
-	    var vkey = new libVES.VaultKey({externals: exts},self);
+	    var vkey = new libVES.VaultKey({externals: exts, creator: self.me()},self);
 	    return vkey.getId().then(function() {
 		return vkey;
 	    }).catch(function(e) {
@@ -286,7 +286,7 @@ libVES.prototype = {
 	    return (new libVES.VaultKey({type: 'current', algo: self.keyAlgo, user: me},self)).generate(Promise.resolve(veskey),options).then(function(k) {
 		return self.getVaultKey().then(function(cur) {
 		    var r;
-		    if (cur)
+		    if (cur) {
 			if (lost) r = cur.setField('type','lost').then(function() {
 			    return me.setField('vaultKeys',[cur,k]).then(function() {
 				return me;
@@ -295,7 +295,8 @@ libVES.prototype = {
 			else r = k.rekeyFrom(cur);
 		    } else r = k;
 		    me.currentVaultKey = me.activeVaultKeys = undefined;
-		    if (!cur || !lost) me.vaultKeys = undefined;
+		    if (!cur 
+		    || !lost) me.vaultKeys = undefined;
 		    return r.post();
 		}).then(function(post) {
 		    return self.reset(post);
@@ -322,7 +323,14 @@ libVES.prototype = {
     },
     getSecondaryKey: function(ext,force) {
 	var self = this;
-	return this.prepareExternals(ext).then(function(ext) {
+	return this.prepareExternals(Promise.resolve(ext).then(function(e) {
+	    if (e.domain && !e.externalId) return libVES.getModule(libVES.Domain,e.domain).then(function(mod) {
+		return self.me().then(function(me) {
+		    return mod.userToVaultRefs(me,self);
+		});
+	    });
+	    return e;
+	})).then(function(ext) {
 	    var vkey = new libVES.VaultKey({externals: ext},self);
 	    return vkey.getId().then(function(id) {
 		return vkey;
@@ -407,23 +415,28 @@ libVES.prototype = {
     putValue: function(fileRef,value,shareWith) {
 	var self = this;
 	return this.getFileItem(fileRef).then(function(vaultItem) {
-	    return vaultItem.getType().then(function(type) {
-	    }).catch(function(e) {
-		return vaultItem.setField('type',libVES.VaultItem.Type._detect(value)).then(function() {
-		    return vaultItem.getFile().then(function(file) {
-			return file.getExternals().then(function(exts) {
-			    return exts[0].getDomain().then(function(domain) {
-				file.setField('path',libVES.getModule(libVES.Domain,domain).then(function(mod) {
-				    return mod.defaultFilePath(file,exts[0]);
-				}).catch(function() {
-				    return '';
-				}));
-			    });
+	    return vaultItem.setField('type',libVES.VaultItem.Type._detect(value)).then(function(type) {
+		return vaultItem.getFile().then(function(file) {
+		    return file.getExternals().then(function(exts) {
+			return exts[0].getDomain().then(function(domain) {
+			    file.setField('path',libVES.getModule(libVES.Domain,domain).then(function(mod) {
+				return mod.defaultFilePath(file,exts[0]);
+			    }).catch(function() {
+				return '';
+			    }));
+			    file.setField('name',libVES.getModule(libVES.Domain,domain).then(function(mod) {
+				return mod.defaultFileName(file,exts[0]);
+			    }).catch(function() {
+				return null;
+			    }));
+			    return type;
 			});
 		    });
 		});
-	    }).then(function(type) {
-	        return Promise.resolve(shareWith || vaultItem.getShareList().catch(function(e) {
+	    }).then(function() {
+	        return Promise.resolve(shareWith || self.getFileItem(fileRef).then(function(vi) {
+	    	    return vi.getShareList();
+	    	}).catch(function(e) {
 		    return self.getSecondaryKey({domain: fileRef.domain}).then(function(vkey) {
 			return [vkey];
 		    });
