@@ -141,7 +141,7 @@ libVES.Object.prototype = {
 	if (!optns) optns = {};
 	if (optns.retry == null) optns.retry = 3;
 	return this.postData(fields).then(function(d) {
-	    return self.VES.post(self.apiUri,d,rfields,{
+	    var op = {
 		onerror: function(errors) {
 		    if (optns.retry-- <= 0) throw new libVES.Error('RequestFailed',"Retry count exceeded",{errors: errors});
 		    var rs = [];
@@ -153,7 +153,9 @@ libVES.Object.prototype = {
 			return self.post(fields,rfields,optns);
 		    });
 		}
-	    });
+	    };
+	    for (var k in optns) op[k] = optns[k];
+	    return self.VES.post(self.apiUri,d,rfields,op);
 	});
     },
     resolveErrorPath: function(e,idx) {
@@ -353,6 +355,18 @@ libVES.VaultKey.prototype = new libVES.Object({
 		return self.resolveVESkey(veskey).then(function(v) {
 		    return self.getPrivateKey().then(function(prk) {
 			return m.import(prk,{password: v});
+		    }).catch(function(e) {
+			if (e.code != 'Legacy') throw e;
+			return self.VES.allowLegacy(self).then(function() {
+			    self.algo = undefined;
+			    self.privateKey = undefined;
+			    self.publicKey = undefined;
+			    return self.setField('passphrase',libVES.Util.ByteArrayToB64(libVES.Util.StringToByteArray(veskey))).then(function() {
+				return self.post().then(function() {
+				    return self.unlock(veskey);
+				});
+			    });
+			});
 		    });
 		});
 	    });
@@ -475,6 +489,9 @@ libVES.VaultKey.prototype = new libVES.Object({
 		return libVES.Util.ByteArrayToString(b);
 	    });
 	});
+    },
+    matchVaults: function(vaultKeys) {
+	return Promise.resolve(false);
     }
 });
 
@@ -558,13 +575,38 @@ libVES.VaultItem.prototype = new libVES.Object({
 	var self = this;
 	return (val == null ? self.getRaw() : self.build(val)).then(function(v) {
 	    return self.VES.usersToKeys(usrs).then(function(ks) {
-		return self.setField('vaultEntries',ks.map(function(k,j) {
-		    return k.encrypt(v).then(function(ctext) {
-			return k.postData().then(function(pd) {
-			    return {vaultKey: pd, encData: ctext};
+		return (val == null ? self.getVaultEntries().then(function(ves) {
+		    var k_ves = {};
+		    var k_used = {};
+		    for (var j = 0; j < ves.length; j++) k_ves[ves[j].vaultKey.id] = ves[j];
+		    return Promise.all(ks.map(function(k,j) {
+			return k.getId().then(function(k_id) {
+			    k_used[k_id] = true;
+			    return k_ves[k_id];
 			});
+		    })).then(function(old_ves) {
+			for (var k_id in k_ves) if (!k_used[k_id]) old_ves.push(k_ves[k_id]);
+			return old_ves;
 		    });
-		}));
+		}) : Promise.resolve([])).then(function(old_ves) {
+		    var new_ves = [];
+		    var set_ves = [];
+		    return Promise.all(ks.map(function(k,j) {
+			return new_ves[j] = (old_ves[j] || k.encrypt(v).then(function(ctext) {
+			    return k.postData().then(function(pd) {
+				return set_ves.push({vaultKey: pd, encData: ctext});
+			    });
+			}));
+		    })).then(function() {
+			return Promise.all(old_ves.map(function(ve,j) {
+			    if (j >= ks.length) return (new libVES.VaultKey(ve.vaultKey,self.VES)).matchVaults(ks).then(function(f) {
+				if (f === false) set_ves.push({vaultKey: ve.vaultKey, '$op': 'delete'});
+			    });
+			}));
+		    }).then(function() {
+			return self.setField('vaultEntries',set_ves);
+		    });
+		});
 	    });
 	}).then(function() {
 	    if (save || save === undefined) return self.post().then(function() {
@@ -659,7 +701,7 @@ libVES.VaultItem.Type = {
 	},
 	build: function(data) {
 	    if (!(data instanceof libVES.Cipher)) throw new libVES.Error('InvalidData',"Content of a VaultItem type 'file' must be libVES.Cipher");
-	    return data.serialize();
+	    return data.getSecret();
 	}
     },
     secret: {

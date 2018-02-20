@@ -8,15 +8,70 @@ libVES.Cipher = function(data) {
     for (var k in data) this[k] = data[k];
 };
 libVES.Cipher.prototype = {
-    init: function(rec) {
-	this.key = rec.slice(0,this.keySize);
-	this.IV = this.initIV = rec.slice(0,this.keySize + this.ivSize).slice(-this.ivSize);
+    init: function(secret) {
+	if (!secret) {
+	    secret = new Uint8Array(this.keySize + this.ivSize);
+	    crypto.getRandomValues(secret);
+	} else if (secret.length < this.keySize) throw new libVES.Error('Internal','Invalid cipher key data');
+	this.key = this.buildKey(secret.slice(0,this.keySize));
+	this.IV = Promise.resolve(secret.slice(0,this.keySize + this.ivSize).slice(-this.ivSize));
 	try {
-	    this.meta = JSON.parse(libVES.Util.ByteArrayToString(rec.slice(this.keySize + this.ivSize)));
+	    this.meta = JSON.parse(libVES.Util.ByteArrayToString(secret.slice(this.keySize + this.ivSize)));
 	} catch(e) {
 	    this.meta = {};
 	}
     },
+    getSecret: function() {
+	var meta = null;
+	if (this.meta) for (var k in this.meta) {
+	    meta = libVES.Util.StringToByteArray(JSON.stringify(this.meta));
+	    break;
+	}
+	var buf = new Uint8Array(this.keySize + this.ivSize + (meta ? meta.byteLength : 0));
+	return Promise.all([this.key,this.IV]).then(function(data) {
+	    return crypto.subtle.exportKey("raw",data[0]).then(function(key) {
+		buf.set(new Uint8Array(key),0);
+		buf.set(new Uint8Array(data[1]),key.byteLength);
+		if (meta) buf.set(meta,key.byteLength + data[1].byteLength);
+		return buf;
+	    });
+	});
+    },
+    buildKey: function(key) {
+	if (!this.algo) return Promise.resolve(key);
+	return crypto.subtle.importKey('raw',key,this.algo,true,['encrypt','decrypt']);
+    },
+    process: function(buf,final,callbk,chunkSize) {
+	buf = new Uint8Array(buf);
+	if (this.processBuf) {
+	    var b = new Uint8Array(buf.byteLength + this.processBuf.byteLength);
+	    b.set(this.processBuf,0);
+	    b.set(buf,this.processBuf.byteLength);
+	    buf = b;
+	}
+	var p = final ? buf.byteLength : (chunkSize ? Math.floor(buf.byteLength / chunkSize) * chunkSize : 0);
+	this.processBuf = p < buf.byteLength ? buf.slice(p) : null;
+	return p > 0 ? callbk(buf.slice(0,p)) : Promise.resolve(new Uint8Array(0));
+    },
+    encryptChunk: function(buf) {
+	return Promise.all([this.key,this.algoInfo()]).then(function(info) {
+	    return crypto.subtle.encrypt(info[1],info[0],buf);
+	});
+    },
+    decryptChunk: function(buf) {
+	return Promise.all([this.key,this.algoInfo()]).then(function(info) {
+	    return crypto.subtle.decrypt(info[1],info[0],buf);
+	});
+    },
+    algoInfo: function() {
+	return Promise.resolve(this.algo);
+    },
+    encrypt: function(buf,final) {
+	return this.process(buf,final,this.encryptChunk.bind(this),this.chunkSizeP);
+    },
+    decrypt: function(buf,final) {
+	return this.process(buf,final,this.decryptChunk.bind(this),this.chunkSizeC);
+    }
 };
 
 libVES.Cipher.AES256 = function(rec) {
@@ -33,8 +88,14 @@ libVES.Cipher.AES256.prototype = new libVES.Cipher({
 });
 
 libVES.Cipher.AES256CBC.prototype = new libVES.Cipher({
+    algo: 'AES-CBC',
     keySize: 32,
-    ivSize: 16
+    ivSize: 16,
+    algoInfo: function() {
+	return this.IV.then(function(iv) {
+	    return {name: 'AES-CBC', iv: iv};
+	});
+    }
 });
 
 libVES.Cipher.AES256CBC.import = function(args,chain,optns) {

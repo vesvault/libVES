@@ -9,8 +9,9 @@ libVES.Util = {
 	var buf = new Uint8Array(s.length);
 	var boffs = 0;
 	for (var i = 0; i < s.length; i++) {
-	    var p = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".indexOf(s[i]);
+	    var p = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/-_".indexOf(s[i]);
 	    if (p >= 0) {
+		if (p >= 64) p -= 2;
 		buf[boffs >> 3] |= p << 2 >> (boffs & 7);
 		boffs += 6;
 		if ((boffs & 7) < 6) buf[boffs >> 3] |= p << (8 - (boffs & 7));
@@ -21,7 +22,7 @@ libVES.Util = {
 	for (var i = 0; i < l; i++) buf2[i] = buf[i];
 	return buf2.buffer;
     },
-    ByteArrayToB64: function(b) {
+    ByteArrayToB64D: function(b,dict) {
 	var buf = new Uint8Array(b);
 	var s = "";
 	var boffs = 0;
@@ -29,10 +30,16 @@ libVES.Util = {
 	    var c = (buf[boffs >> 3] << (boffs & 7)) & 0xfc;
 	    boffs += 6;
 	    if (((boffs & 7) < 6) && ((boffs >> 3) < buf.byteLength)) c |= (buf[boffs >> 3] >> (6 - (boffs & 7)));
-	    s += "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[c >> 2];
+	    s += dict[c >> 2];
 	}
-	for (; boffs & 7; boffs += 6) s += "=";
+	for (; boffs & 7; boffs += 6) s += dict.substr(64);
 	return s;
+    },
+    ByteArrayToB64: function(b) {
+	return libVES.Util.ByteArrayToB64D(b,"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=");
+    },
+    ByteArrayToB64W: function(b) {
+	return libVES.Util.ByteArrayToB64D(b,"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_");
     },
     StringToByteArray: function(s) {
 	if ((s instanceof ArrayBuffer) || (s instanceof Uint8Array)) return s;
@@ -74,7 +81,7 @@ libVES.Util = {
     },
     PEM: {
 	toDER: function(pem) {
-	    var pp = pem.match(/-----BEGIN.*?\n([A-Za-z0-9\/\+\=\s\r\n]*)-----END/s);
+	    var pp = pem.match(/-----BEGIN.*?-----\s*\r?\n([A-Za-z0-9\/\+\=\s\r\n]*)-----END/);
 	    if (!pp) throw new libVES.Error('Internal','PEM formatted key expected');
 	    return new Uint8Array(libVES.Util.B64ToByteArray(pp[1]));
 	},
@@ -294,6 +301,11 @@ libVES.Util = {
 		    });
 		});
 	    });
+	}
+    },
+    Hash: {
+	SHA256: function(buf) {
+	    return crypto.subtle.digest('SHA-256',buf);
 	}
     }
 };

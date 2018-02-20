@@ -12,16 +12,19 @@ if (!window.libVES) window.libVES = function(optns) {
 	throw new libVES.Error('Init','crypto.subtle is not usable' + (document.location.protocol.match(/https/) ? '' : ' (try https?)'));
     }
     for (var k in optns) this[k] = optns[k];
-    if (this.domain && this.externalId != null) this.type = 'secondary';
+    if (this.domain) this.type = 'secondary';
     else if (this.user) this.type = 'primary';
-    else throw new libVES.Error('InvalidValue','Required parameters: user || (domain && externalId)');
+    else throw new libVES.Error('InvalidValue','Required parameters: user || domain');
     this.unlockedKeys = {};
 }
 
 libVES.prototype = {
     apiUrl: 'https://api.ves.host/v1/',
+    wwwUrl: 'https://www.vesvault.com/',
 //    e2e: ['signal'],
     keyAlgo: 'RSA',
+    textCipher: 'AES256CBC',
+    defaultHash: 'SHA256',
     
     request: function(method,uri,body,optns) {
 	if (!optns) optns = {};
@@ -54,7 +57,7 @@ libVES.prototype = {
 	    };
 	    if (body != null) xhr.setRequestHeader('Content-Type','application/json');
 	    xhr.setRequestHeader('Accept','application/json');
-	    if (this.user && optns.passwd) xhr.setRequestHeader('Authorization','Basic ' + btoa(this.user + ':' + optns.passwd));
+	    if (this.user && optns.password) xhr.setRequestHeader('Authorization','Basic ' + btoa(this.user + ':' + optns.password));
 	    else if (this.token) xhr.setRequestHeader('Authorization','Bearer ' + this.token);
 	    xhr.responseType = 'json';
 	    xhr.send(body);
@@ -83,7 +86,7 @@ libVES.prototype = {
     login: function(passwd) {
 	var self = this;
 	return this.userMe = Promise.resolve(passwd).then(function(passwd) {
-	    return self.get('me',{sessionToken: true},{passwd: passwd}).then(function(data) {
+	    return self.get('me',{sessionToken: true},{password: passwd}).then(function(data) {
 		if (!data.sessionToken) throw new libVES.Error('InvalidValue','Session Token is not received');
 		self.token = data.sessionToken;
 		return new libVES.User(data,self);
@@ -93,6 +96,12 @@ libVES.prototype = {
     logout: function() {
 	this.token = undefined;
 	return this.lock();
+    },
+    delegate: function() {
+	var self = this;
+	return libVES.getModule(libVES,'Delegate').then(function(dlg) {
+	    return dlg.login(self);
+	});
     },
     me: function() {
 	var self = this;
@@ -193,7 +202,7 @@ libVES.prototype = {
 		if (u instanceof libVES.VaultKey) return [u];
 		else if (u instanceof libVES.External) return [new libVES.VaultKey({externals:[u]},self)];
 		else if (u instanceof libVES.User) return self.getUserKeys(u);
-		else if (u.domain != null || u.externalId != null) return self._matchSecondaryKey(u,u.user).then(function(vkey) {
+		else if (u instanceof Array || u.domain != null || u.externalId != null) return self._matchSecondaryKey(u,u.user).then(function(vkey) {
 		    return [vkey];
 		});
 	    }
@@ -213,18 +222,28 @@ libVES.prototype = {
     },
     _matchSecondaryKey: function(ext,user) {
 	var self = this;
-	return self.prepareExternals(ext).then(function(exts) {
+	var m = function() {
+	    return libVES.getModule(libVES.Domain,ext.domain);
+	};
+	return (ext.externalId ? self.prepareExternals(ext) : m().then(function(dom) {
+	    return Promise.resolve(user || self.me()).then(function(u) {
+		return dom.userToVaultRef(u);
+	    }).then(function(ex) {
+		return self.prepareExternals([ex]);
+	    });
+	}).catch(function(e) {
+	    throw new libVES.Error('NotFound','Cannot match externalId for domain:' + ext.domain + ', user:' + user + '. Define libVES.Domain.' + ext.domain + '.userToVaultRef(user) to return a valid reference.',{error: e});
+	})).then(function(exts) {
 	    var vkey = new libVES.VaultKey({externals: exts, creator: self.me()},self);
 	    return vkey.getId().then(function() {
 		return vkey;
 	    }).catch(function(e) {
 		if (e.code != 'NotFound') throw e;
-		if (!user) user = libVES.getModule(libVES.Domain,exts[0].domain).then(function(dom) {
-		    return dom.vaultRefsToUser(exts);
-		}).catch(function(e) {
-		    throw new libVES.Error('NotFound','No matching secondary key (domain:' + exts[0].domain + ', externalId:' + exts[0].externalId + '). Supply "user" to create the temp key, or define libVES.Domain.' + exts[0].domain + '.vaultRefsToUser(vaultRefs) to return matching libVES.User',{error: e});
-		});
-		return Promise.resolve(user).then(function(u) {
+		return Promise.resolve(user || m().then(function(dom) {
+		    return dom.vaultRefToUser(exts[0]);
+		})).catch(function(e) {
+		    throw new libVES.Error('NotFound','No matching secondary key (domain:' + ext.domain + ', externalId:' + ext.externalId + '). Supply "user" to create the temp key, or define libVES.Domain.' + ext.domain + '.vaultRefToUser(vaultRef) to return matching libVES.User',{error: e});
+		}).then(function(u) {
 		    return self.createTempKey(self._matchUser(u)).then(function(vkey) {
 			return vkey.setField('externals',exts).then(function() {
 			    return vkey;
@@ -235,7 +254,6 @@ libVES.prototype = {
 	});
     },
     getUserKeys: function(usr) {
-//	console.log('getUserKeys',usr,usr.activeVaultKeys,usr.currentVaultKey,usr.shadowVaultKey);
 	var self = this;
 	return usr.getActiveVaultKeys().then(function(keys) {
 	    if (!keys.length) return self.createTempKey(usr).then(function(k) {
@@ -288,6 +306,7 @@ libVES.prototype = {
 		    var r;
 		    if (cur) {
 			if (lost) r = cur.setField('type','lost').then(function() {
+			    k.user = undefined;
 			    return me.setField('vaultKeys',[cur,k]).then(function() {
 				return me;
 			    });
@@ -297,7 +316,9 @@ libVES.prototype = {
 		    me.currentVaultKey = me.activeVaultKeys = undefined;
 		    if (!cur 
 		    || !lost) me.vaultKeys = undefined;
-		    return r.post();
+		    return r;
+		}).then(function(r) {
+		    return r.post(undefined,undefined,options);
 		}).then(function(post) {
 		    return self.reset(post);
 		}).then(function() {
@@ -326,7 +347,7 @@ libVES.prototype = {
 	return this.prepareExternals(Promise.resolve(ext).then(function(e) {
 	    if (e.domain && !e.externalId) return libVES.getModule(libVES.Domain,e.domain).then(function(mod) {
 		return self.me().then(function(me) {
-		    return mod.userToVaultRefs(me,self);
+		    return mod.userToVaultRef(me,self);
 		});
 	    });
 	    return e;
@@ -352,7 +373,8 @@ libVES.prototype = {
 			if (!v) throw new libVES.Error('InvalidValue','VESkey cannot be empty');
 			return vi.shareWith([me],v,false).then(function() {
 			    return k.post().then(function(post) {
-				return self.reset(post);
+				self.reset(post);
+				return k;
 			    });
 			});
 		    });
@@ -419,12 +441,13 @@ libVES.prototype = {
 		return vaultItem.getFile().then(function(file) {
 		    return file.getExternals().then(function(exts) {
 			return exts[0].getDomain().then(function(domain) {
-			    file.setField('path',libVES.getModule(libVES.Domain,domain).then(function(mod) {
+			    var m = libVES.getModule(libVES.Domain,domain);
+			    file.setField('path',m.then(function(mod) {
 				return mod.defaultFilePath(file,exts[0]);
 			    }).catch(function() {
 				return '';
 			    }));
-			    file.setField('name',libVES.getModule(libVES.Domain,domain).then(function(mod) {
+			    file.setField('name',m.then(function(mod) {
 				return mod.defaultFileName(file,exts[0]);
 			    }).catch(function() {
 				return null;
@@ -437,18 +460,59 @@ libVES.prototype = {
 	        return Promise.resolve(shareWith || self.getFileItem(fileRef).then(function(vi) {
 	    	    return vi.getShareList();
 	    	}).catch(function(e) {
-		    return self.getSecondaryKey({domain: fileRef.domain}).then(function(vkey) {
-			return [vkey];
-		    });
+		    return self.usersToKeys([{domain: fileRef.domain}]);
 		})).then(function(shareWith) {
 		    return vaultItem.shareWith(shareWith,value);
 		});
 	    });
 	});
     },
+    shareFile: function(fileRef,shareWith) {
+	return this.getFileItem(fileRef).then(function(vaultItem) {
+	    return vaultItem.shareWith(shareWith);
+	});
+    },
     deleteFile: function(fileRef) {
 	return this.getFile(fileRef).then(function(file) {
 	    return file.delete();
+	});
+    },
+    newSecret: function(cls) {
+	if (!cls) cls = this.textCipher;
+	else cls = cls.split('.')[0];
+	return libVES.getModule(libVES.Cipher,cls).then(function(ci) {
+	    return (new ci()).getSecret().then(function(buf) {
+		return cls + '.' + libVES.Util.ByteArrayToB64W(buf);
+	    });
+	});
+    },
+    secretToCipher: function(secret) {
+	var ss = secret.split('.');
+	return libVES.getModule(libVES.Cipher,ss[0]).then(function(cls) {
+	    return new cls(libVES.Util.B64ToByteArray(ss[1]));
+	});
+    },
+    encryptText: function(openText,secret) {
+	return this.secretToCipher(secret).then(function(ci) {
+	    return ci.encrypt(libVES.Util.StringToByteArray(openText),true).then(function(buf) {
+		return libVES.Util.ByteArrayToB64W(buf);
+	    });
+	});
+    },
+    decryptText: function(cipherText,secret) {
+	return this.secretToCipher(secret).then(function(ci) {
+	    return ci.decrypt(libVES.Util.B64ToByteArray(cipherText),true).then(function(buf) {
+		return libVES.Util.ByteArrayToString(buf);
+	    });
+	});
+    },
+    hashText: function(text,cls) {
+	if (cls) cls = cls.split('.')[0];
+	else cls = this.defaultHash;
+	return libVES.getModule(libVES.Util,['Hash',cls]).then(function(fn) {
+	    return fn(libVES.Util.StringToByteArray(text)).then(function(buf) {
+		return cls + '.' + libVES.Util.ByteArrayToB64W(buf);
+	    });
 	});
     },
     shareTempKeys: function() {
@@ -578,6 +642,12 @@ libVES.prototype = {
 	    }).then(function() {
 		self.watchTmOut = window.setTimeout(self.watch.bind(self),1500);
 	    });
+	});
+    },
+    allowLegacy: function(obj) {
+	return new Promise(function(resolve,reject) {
+	    if (window.confirm('This Vault Key was created using a legacy algorithm, and cannot be handled using the end-to-end library.\nVESvault will need to securely communicate your current VESkey to the server to re-encrypt your data using the new algorithms.\nDo you want to proceed?')) resolve(true);
+	    else reject(new libVES.Error('Legacy','Legacy algorithms are not allowed'));
 	});
     },
     abort: function() {

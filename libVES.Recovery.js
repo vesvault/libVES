@@ -76,7 +76,7 @@ libVES.Recovery.prototype = {
     getFriendInfo: function(user) {
 	var self = this;
 	return this.getTokens().then(function(tkns) {
-	    return Promise.resolve(tkns.map(function(v,i) {
+	    return Promise.all(tkns.map(function(v,i) {
 		return v.user.getId();
 	    })).then(function(uids) {
 			return user.getId().then(function(uid) {
@@ -88,7 +88,7 @@ libVES.Recovery.prototype = {
     },
     getMyToken: function() {
 	var self = this;
-	return self.vaultKey.libVES.me().then(function(me) {
+	return self.vaultKey.VES.me().then(function(me) {
 	    return self.getFriendInfo(me);
 	});
     },
