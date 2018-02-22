@@ -5,11 +5,12 @@
  * GPL license, http://www.gnu.org/licenses/
  */
 libVES.Delegate = {
-    html: '<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:table;">'
+    html: '<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:table;z-index:2;">'
+	+ '<div style="width: 500px; height: 120px;background-color:white;margin: 20% auto auto auto;padding: 30px 0px 30px 30px;">'
 	+ '<div style="display:table-row;"><div style="display:table-cell;vertical-align:middle;text-align:center;">'
 	+ '<p>Use VESvault popup window to grant the App Vault permission</p>'
 	+ '<p><a href="#" onclick="libVES.Delegate.cancel(); return false;">Cancel</a></p>'
-	+ '</div></div></div>',
+	+ '</div></div></div></div>',
     name: 'VESvaultDelegate',
     login: function(VES,challenge,optns) {
 	if (this.popup) return this.response || Promise.reject(new libVES.Error('InvalidValue','The delegate popup is already open'));

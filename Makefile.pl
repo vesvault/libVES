@@ -21,6 +21,7 @@ for (@Src) {
     open(SRC,$_) || die "Failed to read from $_";
     while (<SRC>) {
 	s/^\s*\/\/.*//s;
+	s/\r//s;
 	$result .= $_;
     }
     close SRC;
