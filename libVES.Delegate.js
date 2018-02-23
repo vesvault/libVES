@@ -40,7 +40,7 @@ libVES.Delegate = {
     },
     listener: function(evnt) {
 	if (evnt.source == this.popupWindow) {
-	    var msg = eval('(' + evnt.data + ')');
+	    var msg = JSON.parse(evnt.data);
 	    var VES = this.VES;
 	    if (msg.externalId) {
 		VES.externalId = msg.externalId;
@@ -48,7 +48,7 @@ libVES.Delegate = {
 		    return VES;
 		}));
 		this.close();
-	    } else {
+	    } else if (msg.token) {
 		VES.token = msg.token;
 		this.resolve(VES.getSecondaryKey({domain:VES.domain},true).then(function(vaultKey) {
 		    return vaultKey.getExternals().then(function(externals) {
@@ -69,9 +69,12 @@ libVES.Delegate = {
     },
     close: function() {
 	if (this.popup) {
-	    if (this.popupWindow) try {
-		if (this.popupWindow.close()) this.popupWindow = null;
-	    } catch (e) {}
+	    if (this.popupWindow) {
+		try {
+		    this.popupWindow.close();
+		} catch (e) {}
+		this.popupWindow = null;
+	    }
 	    window.clearInterval(this.popupInterval);
 	    this.popupInterval = null;
 	    this.popup.parentNode.removeChild(this.popup);
