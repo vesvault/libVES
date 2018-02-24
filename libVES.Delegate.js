@@ -5,12 +5,15 @@
  * GPL license, http://www.gnu.org/licenses/
  */
 libVES.Delegate = {
-    html: '<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:table;z-index:2;">'
-	+ '<div style="width: 500px; height: 120px;background-color:white;margin: 20% auto auto auto;padding: 30px 0px 30px 30px;">'
+    html: '<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:table;z-index:200000;">'
 	+ '<div style="display:table-row;"><div style="display:table-cell;vertical-align:middle;text-align:center;">'
-	+ '<p>Use VESvault popup window to grant the App Vault permission</p>'
+	+ '<div style="min-width:320px;max-width:640px;;background-color:white;margin: auto;padding: 30px;">'
+	+ '<p>Use the VESvault popup window to grant access to the App Vault</p>'
+	+ '<p class="VESvaultDelegateBlockerMsg" style="color: #bf7f00; font-style:italic;">&nbsp;</p>'
+	+ '<p><a href="{$url}" target="VESvaultDelegate" onclick="return !libVES.Delegate.retryPopup(this.href,this)">Click here</a> if you can\'t see VESvault popup window</p>'
 	+ '<p><a href="#" onclick="libVES.Delegate.cancel(); return false;">Cancel</a></p>'
 	+ '</div></div></div></div>',
+    htmlBlockerMsg: 'Looks like your browser is using a popup blocker...',
     name: 'VESvaultDelegate',
     login: function(VES,challenge,optns) {
 	if (this.popup) return this.response || Promise.reject(new libVES.Error('InvalidValue','The delegate popup is already open'));
@@ -23,23 +26,37 @@ libVES.Delegate = {
 	return this.response = new Promise(function(resolve,reject) {
 	    self.reject = reject;
 	    self.resolve = resolve;
-	    self.popup = document.createElement('DIV');
-	    self.popup.innerHTML = self.html;
-	    document.getElementsByTagName('BODY')[0].appendChild(self.popup);
 	    var url = VES.wwwUrl + 'session/delegate/' + escape(VES.app) + '/' + escape(VES.domain);
-	    self.popupWindow = window.open(url,self.name,"width=500,height=500,top=100,left=100");
-	    if (self.popupWindow) self.popupWindow.onblur = function() {
-		window.setTimeout(function() {console.log(self.popupWindow.closed);},0);
-//		self.cancel.bind(self);
-	    };
+	    self.matchOrigin = (function(m) { return m ? m[0] : document.location.protocol + '//' + document.location.host; })(url.match(/^(https\:\/\/[^\/\?\#]+)/));
+	    self.popup = document.createElement('DIV');
+	    self.popup.innerHTML = self.html.replace('{$url}',url);
+	    document.getElementsByTagName('BODY')[0].appendChild(self.popup);
+	    self.retryPopupCalled = 0;
+	    if (!self.openPopup(url)) try {
+		document.getElementsByClassName('VESvaultDelegateBlockerMsg')[0].innerHTML = self.htmlBlockerMsg;
+	    } catch(e) {
+		window.alert(self.htmlBlockerMsg);
+	    }
 	    window.addEventListener('message',self.listener.bind(self));
 	    window.addEventListener('focus',self.chkCancel.bind(self));
 	    window.clearInterval(self.popupInterval);
 	    this.popupInterval = window.setInterval(self.chkCancel.bind(self),1000);
 	});
     },
+    openPopup: function(url) {
+	return this.popupWindow = window.open(url,this.name,"width=500,height=500,top=100,left=100");
+    },
+    retryPopup: function(url,href) {
+	var f = this.retryPopupCalled;
+	this.retryPopupCalled++;
+	if (href && f > 1) href.target = '_blank';
+	else if (this.popupWindow) try {
+	    this.popupWindow.focus();
+	} catch(e) {}
+	return !f && this.openPopup(url);
+    },
     listener: function(evnt) {
-	if (evnt.source == this.popupWindow) {
+	if (evnt.origin == this.matchOrigin) {
 	    var msg = JSON.parse(evnt.data);
 	    var VES = this.VES;
 	    if (msg.externalId) {
@@ -47,7 +64,6 @@ libVES.Delegate = {
 		this.resolve(VES.unlock(msg.VESkey).then(function() {
 		    return VES;
 		}));
-		this.close();
 	    } else if (msg.token) {
 		VES.token = msg.token;
 		this.resolve(VES.getSecondaryKey({domain:VES.domain},true).then(function(vaultKey) {
@@ -63,8 +79,9 @@ libVES.Delegate = {
 			});
 		    });
 		}));
-		this.close();
-	    }
+	    } else return;
+	    this.close();
+	    if (!evnt.source.closed) evnt.source.close();
 	}
     },
     close: function() {
