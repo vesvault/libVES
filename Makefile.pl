@@ -15,6 +15,7 @@ close VER;
 
 $Dst = "libVES-$Version.js";
 $DstMin = "libVES-$Version.min.js";
+$DstNode = "libVES-$Version.node.js";
 $result = '';
 
 for (@Src) {
@@ -29,17 +30,28 @@ for (@Src) {
 
 $result =~s/\/\*.*?\*\///sg;
 
-open(DST,">$Dst") || die "Failed to write to $Dst";
-print DST <<'HEAD';
+$Head = <<HEAD;
 /**
- * @title libVES
- * @dev A JavaScript end-to-end encryption interface to VESvault REST API
+ * \@title libVES
+ * \@dev A JavaScript end-to-end encryption interface to VESvault REST API
+ * \@version $Version
  *
- * @author Jim Zubov <jz@vesvault.com> (VESvault)
+ * \@dev Official source code: https://github.com/vesvault/libVES
+ *
+ * \@author Jim Zubov <jz\@vesvault.com> (VESvault)
  * GPL license, http://www.gnu.org/licenses/
  */
 HEAD
+
+open(DST,">$Dst") || die "Failed to write to $Dst";
+print DST $Head;
 print DST $result;
 close(DST) || die "Failed to write to $Dst";
+
+open(DST,">$DstNode") || die "Failed to write to $DstNode";
+print DST $Head;
+print DST $result;
+print DST "\nmodule.exports = libVES;\n";
+close(DST) || die "Failed to write to $DstNode";
 
 `curl --data-urlencode input\@$Dst https://javascript-minifier.com/raw > $DstMin`;

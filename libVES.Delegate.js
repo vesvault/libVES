@@ -40,7 +40,7 @@ libVES.Delegate = {
 	    window.addEventListener('message',self.listener.bind(self));
 	    window.addEventListener('focus',self.chkCancel.bind(self));
 	    window.clearInterval(self.popupInterval);
-	    this.popupInterval = window.setInterval(self.chkCancel.bind(self),1000);
+	    self.popupInterval = window.setInterval(self.chkCancel.bind(self),1000);
 	});
     },
     openPopup: function(url) {
@@ -56,7 +56,7 @@ libVES.Delegate = {
 	return !f && this.openPopup(url);
     },
     listener: function(evnt) {
-	if (evnt.origin == this.matchOrigin) {
+	if (evnt.origin == this.matchOrigin) try {
 	    var msg = JSON.parse(evnt.data);
 	    var VES = this.VES;
 	    if (msg.externalId) {
@@ -82,7 +82,7 @@ libVES.Delegate = {
 	    } else return;
 	    this.close();
 	    if (!evnt.source.closed) evnt.source.close();
-	}
+	} catch(e) {}
     },
     close: function() {
 	if (this.popup) {
