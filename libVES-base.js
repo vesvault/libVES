@@ -255,7 +255,20 @@ libVES.prototype = {
     },
     getUserKeys: function(usr) {
 	var self = this;
-	return usr.getActiveVaultKeys().then(function(keys) {
+	return usr.getActiveVaultKeys().catch(function(e) {
+	    if (e.code == 'NotFound') return [];
+	    throw e;
+	}).then(function(keys) {
+	    return Promise.all(keys.map(function(k,i) {
+		return k.getPublicCryptoKey().then(function() {
+		    return k;
+		}).catch(function() {});
+	    })).then(function(keys) {
+		var rs = [];
+		for (var i = 0; i < keys.length; i++) if (keys[i]) rs.push(keys[i]);
+		return rs;
+	    });
+	}).then(function(keys) {
 	    if (!keys.length) return self.createTempKey(usr).then(function(k) {
 		return [k];
 	    });
@@ -276,7 +289,6 @@ libVES.prototype = {
 		    });
 		});
 	    }));
-	    key.getField('vaultItems').then(function(vis) { console.log(vis); });
 	    key.setField('creator',self.me());
 	    return key;
 	});
@@ -385,34 +397,35 @@ libVES.prototype = {
     setShadow: function(usrs,optns) {
 	if (!optns || !optns.n) return Promise.reject(new libVES.Error('InvalidValue','optns.n must be an integer'));
 	var self = this;
-	return this.usersToKeys(usrs).then(function(ks) {
-	    var rkey = new Uint8Array(32);
-	    window.crypto.getRandomValues(rkey);
-	    var algo = optns.v ? libVES.Scramble.algo[optns.v] : libVES.Scramble.RDX;
-	    if (!algo) throw 'Unknown scramble algorithm: ' + optns.v;
-	    var s = new algo(optns.n);
-	    return s.explode(rkey,usrs.length).then(function(tkns) {
-		return self.me().then(function(me) {
-		    me.activeVaultKeys = undefined;
-		    return me.setField('shadowVaultKey',new libVES.VaultKey({type: 'shadow', user: me, algo: self.keyAlgo},self).generate(rkey,optns),false).then(function(k) {
-			return me.getCurrentVaultKey().then(function(curr) {
-			    return k.rekeyFrom(curr).catch(function() {}).then(function() {
-				k.setField('vaultItems',Promise.all(tkns.map(function(tk,i) {
-				    var vi = new  libVES.VaultItem({type: 'secret'},self);
-				    return vi.shareWith([usrs[i]],tk,false).then(function() {
-					return vi;
-				    });
-				})));
-//				me.vaultEntries = undefined;
-				return k.post();
-			    });
+	var rkey = new Uint8Array(32);
+	window.crypto.getRandomValues(rkey);
+	var algo = optns.v ? libVES.Scramble.algo[optns.v] : libVES.Scramble.RDX;
+	if (!algo) return Promise.reject(new libVES.Error('InvalidValue','Unknown scramble algorithm: ' + optns.v));
+	var s = new algo(optns.n);
+	return s.explode(rkey,usrs.length).then(function(tkns) {
+	    return self.me().then(function(me) {
+		me.activeVaultKeys = undefined;
+		return me.setField('shadowVaultKey',new libVES.VaultKey({type: 'shadow', user: me, algo: self.keyAlgo},self).generate(rkey,optns),false).then(function(k) {
+		    return me.getCurrentVaultKey().then(function(curr) {
+			return k.rekeyFrom(curr).catch(function() {}).then(function() {
+			    libVES.Object._refs = {"#/":k};
+			    k.setField('vaultItems',Promise.all(tkns.map(function(tk,i) {
+				var vi = new  libVES.VaultItem({type: 'secret'},self);
+				return vi.shareWith([usrs[i]],tk,false).then(function() {
+				    return vi;
+				});
+			    })).then(function(vis) {
+				delete(libVES.Object._refs);
+				return vis;
+			    }));
+			    return k.post();
 			});
-		    }).catch(function(e) {
-			me.shadowVaultKey = undefined;
-			throw e;
-		    }).then(function() {
-			return me.getShadowVaultKey();
 		    });
+		}).catch(function(e) {
+		    me.shadowVaultKey = undefined;
+		    throw e;
+		}).then(function() {
+		    return me.getShadowVaultKey();
 		});
 	    });
 	});
@@ -642,12 +655,6 @@ libVES.prototype = {
 	    }).then(function() {
 		self.watchTmOut = window.setTimeout(self.watch.bind(self),1500);
 	    });
-	});
-    },
-    allowLegacy: function(obj) {
-	return new Promise(function(resolve,reject) {
-	    if (window.confirm('This Vault Key was created using a legacy algorithm, and cannot be handled using the end-to-end library.\nVESvault will need to securely communicate your current VESkey to the server to re-encrypt your data using the new algorithms.\nDo you want to proceed?')) resolve(true);
-	    else reject(new libVES.Error('Legacy','Legacy algorithms are not allowed'));
 	});
     },
     abort: function() {

@@ -100,30 +100,22 @@ libVES.Object.prototype = {
     getId: function() {
 	return this.id ? Promise.resolve(this.id) : this.getField('id');
     },
-    postData: function(path,fields) {
-	if (this.postDataPath) {
-	    return Promise.resolve({"$ref":'#/' + this.postDataPath.join('/')});
-	}
-	if (!path) path = [];
-//	this.postDataPath = path;
+    postData: function(fields,refs) {
+	if (refs) for (var k in refs) if (refs[k] === this) return Promise.resolve({"$ref": k});
 	var data = {};
 	var prs = [];
 	var self = this;
-	var fmt = function(v,a,p) {
-	    var l = p.length;
-	    if (v instanceof libVES.Object) return v.postData(p,a);
+	var fmt = function(v,a) {
+	    if (v instanceof libVES.Object) return v.postData(a,refs);
 	    else if (v instanceof Array) return Promise.all(v.map(function(vv,i) {
-		p[l] = i;
-		return fmt(vv,a,p);
+		return fmt(vv,a);
 	    }));
 	    else return v;
 	};
 	var pf = function(k,pr,a) {
-	    var p = path.slice();
-	    p[p.length] = k;
-	    if (!(pr instanceof Promise)) pr = fmt(pr,a,p);
+	    if (!(pr instanceof Promise)) pr = fmt(pr,a);
 	    if (pr instanceof Promise) prs.push(pr.then(function(pr2) {
-		return Promise.resolve(fmt(pr2,a,p)).then(function(v) {
+		return Promise.resolve(fmt(pr2,a)).then(function(v) {
 		    data[k] = v;
 		});
 	    }));
@@ -132,7 +124,6 @@ libVES.Object.prototype = {
 	if (!(fields instanceof Object)) fields = this.fieldUpdate;
 	if (fields) for (var k in fields) if (this[k] !== undefined) pf(k,this[k],fields[k]);
 	return Promise.all(prs).then(function() {
-	    self.postDataPath = null;
 	    return data;
 	});
     },
@@ -140,7 +131,7 @@ libVES.Object.prototype = {
 	var self = this;
 	if (!optns) optns = {};
 	if (optns.retry == null) optns.retry = 3;
-	return this.postData(fields).then(function(d) {
+	return this.postData(fields,optns.refs).then(function(d) {
 	    var op = {
 		onerror: function(errors) {
 		    if (optns.retry-- <= 0) throw new libVES.Error('RequestFailed',"Retry count exceeded",{errors: errors});
@@ -356,17 +347,9 @@ libVES.VaultKey.prototype = new libVES.Object({
 		    return self.getPrivateKey().then(function(prk) {
 			return m.import(prk,{password: v});
 		    }).catch(function(e) {
-			if (e.code != 'Legacy') throw e;
-			return self.VES.allowLegacy(self).then(function() {
-			    self.algo = undefined;
-			    self.privateKey = undefined;
-			    self.publicKey = undefined;
-			    return self.setField('passphrase',libVES.Util.ByteArrayToB64(libVES.Util.StringToByteArray(veskey))).then(function() {
-				return self.post().then(function() {
-				    return self.unlock(veskey);
-				});
-			    });
-			});
+			if (e.code != 'Legacy' || !self.VES.unlockLegacyKey) throw e;
+			delete(self.VES.unlockedKeys[id]);
+			return self.VES.unlockLegacyKey(self,veskey);
 		    });
 		});
 	    });
@@ -593,7 +576,7 @@ libVES.VaultItem.prototype = new libVES.Object({
 		    var set_ves = [];
 		    return Promise.all(ks.map(function(k,j) {
 			return new_ves[j] = (old_ves[j] || k.encrypt(v).then(function(ctext) {
-			    return k.postData().then(function(pd) {
+			    return k.postData(null,libVES.Object._refs).then(function(pd) {
 				return set_ves.push({vaultKey: pd, encData: ctext});
 			    });
 			}));
