@@ -434,26 +434,36 @@ libVES.VaultKey.prototype = new libVES.Object({
     },
     rekeyFrom: function(key,veskey) {
 	var self = this;
-	self.setField('vaultEntries',key.unlock(veskey).then(function() {
-	    return key.getVaultEntries().then(function(ves) {
-		return Promise.all(ves.map(function(ve) {
-		    return key.decrypt(ve.encData).then(function(ptxt) {
-			return self.encrypt(ptxt).then(function(ctxt) {
+	var old_vis = {};
+	return (self.vaultEntries ? self.vaultEntries.then(function(old_ves) {
+	    return old_ves.map(function(ve,i) {
+		old_vis[ve.vaultItem.id] = true;
+	    });
+	}) : Promise.resolve(null)).then(function() {
+	    return self.setField('vaultEntries',key.unlock(veskey).then(function() {
+		return key.getVaultEntries().then(function(ves) {
+		    return Promise.all(ves.map(function(ve) {
+			return old_vis[ve.vaultItem.id] ? Promise.resolve({
+			    vaultItem: {id: ve.vaultItem.id}
+			}) : key.decrypt(ve.encData).then(function(ptxt) {
+			    return self.encrypt(ptxt).then(function(ctxt) {
+				return {
+				    vaultItem: {id: ve.vaultItem.id},
+				    encData: ctxt
+				};
+			    });
+			}).catch(function(e) {
 			    return {
 				vaultItem: {id: ve.vaultItem.id},
-				encData: ctxt
+				"$op": "ignore"
 			    };
 			});
-		    }).catch(function(e) {
-			return {
-			    vaultItem: {id: ve.vaultItem.id},
-			    "$op": "ignore"
-			};
-		    });
-		}));
-	    });
-	}));
-	return Promise.resolve(self);
+		    }));
+		});
+	    }));
+	}).then(function() {
+	    return self;
+	});
     },
     getRecovery: function() {
 	var self = this;
@@ -691,7 +701,7 @@ libVES.VaultItem.Type = {
 	parse: function(buf) {
 	    var self = this;
 	    return this.getMeta().then(function(meta) {
-		return {data: buf, meta: meta};
+		return {value: buf, meta: meta};
 	    });
 	},
 	build: function(data) {

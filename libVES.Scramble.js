@@ -48,7 +48,6 @@ libVES.Scramble.RDX.prototype = {
 	vi.set(u[i]);
 	vi[u[i].length] = 1;
 	v[i] = Promise.resolve(vi);
-//	console.log('v',v);
 	return Promise.all(v);
     },
     fromVector: function(vec) {

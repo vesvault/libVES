@@ -14,7 +14,18 @@ libVES.Recovery.prototype = {
 	var self = this;
 	return this.tokens = self.vaultKey.getType().then(function(t) {
 	    switch (t) {
-		case 'shadow': case 'recovery': return self.vaultKey.getVaultItems().then(function(vis) {
+		case 'shadow': case 'recovery': return self.vaultKey.getField('vaultItems',{
+		    id: true,
+		    meta: true,
+		    type: true,
+		    vaultEntries: {
+			encData: true,
+			vaultKey: {
+			    user: true,
+			    type: true
+			}
+		    }
+		},true).then(function(vis) {
 		    var frnds = {};
 		    var fn = function() {
 			return self.vaultKey.getUser().then(function(my_u) {
@@ -35,11 +46,9 @@ libVES.Recovery.prototype = {
 						});
 					    }));
 					}),
-					vi.getMeta().then(function(meta) {
-					    frnd.meta = meta;
-					}),
 					vi.get().then(function(data) {
-					    frnd.value = data;
+					    frnd.meta = data.meta;
+					    frnd.value = data.value;
 					}).catch(function(){})
 				    ]);
 				}));
@@ -57,7 +66,7 @@ libVES.Recovery.prototype = {
 	});
     },
     requireOwner: function() {
-	return Promise.all(this.vaultKey.getUser(),this.vaultKey.libVES.me()).then(function(usrs) {
+	return Promise.all([this.vaultKey.getUser(),this.vaultKey.VES.me()]).then(function(usrs) {
 	    return Promise.all(usrs.map(function(v,i) {
 		return v.getId();
 	    })).then(function(uids) {
@@ -133,10 +142,12 @@ libVES.Recovery.prototype = {
     },
     _assist: function(assist) {
 	var self = this;
-	this.getMyToken().then(function(tkn) {
+	return this.getMyToken().then(function(tkn) {
 	    if (!tkn) throw new libVES.Error('InvalidValue','No assistance available');
 	    return self.vaultKey.getUser().then(function(user) {
 		return tkn.vaultItem.shareWith(assist ? [tkn.user,user] : [tkn.user]).then(function() {
+		    self.tokens = undefined;
+		    self.vaultKey.vaultItems = undefined;
 		    return true;
 		});
 	    });
@@ -150,15 +161,26 @@ libVES.Recovery.prototype = {
     },
     _recover: function() {
 	var self = this;
-	self.getTokens().then(function(tkns) {
+	return self.getTokens().then(function(tkns) {
 	    var vtkns = [];
 	    for (var i = 0; i < tkns.length; i++) if (tkns[i].value != null) vtkns.push(tkns[i]);
 	    if (vtkns.length) return libVES.getModule(libVES,['Scramble','algo',vtkns[0].meta.v]).then(function(sc) {
-		return sc.implode(vtkns,function(secret) {
+		return new sc(vtkns[0].meta.n).implode(vtkns,function(secret) {
 		    return self.vaultKey.unlock(secret).then(function() {
 			return self.vaultKey.getUser().then(function(user) {
-			    return user.getCurrentVaultKey().then(function(curr) {
-				return curr.rekeyFrom(self.vaultKey);
+			    return user.getActiveVaultKeys().then(function(vaultKeys) {
+				return Promise.all(vaultKeys.map(function(vaultKey,i) {
+				    return vaultKey.getVaultEntries().then(function() {
+					return vaultKey.rekeyFrom(self.vaultKey);
+				    });
+				})).then(function(vaultKeys) {
+				    return user.setField('vaultKeys',vaultKeys).then(function() {
+					return user.post().then(function() {
+					    user.vaultKeys = undefined;
+					    return true;
+					});
+				    });
+				});
 			    });
 			});
 		    });
