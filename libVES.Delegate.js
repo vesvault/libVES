@@ -44,7 +44,7 @@ libVES.Delegate = {
 	});
     },
     openPopup: function(url) {
-	return this.popupWindow = window.open(url,this.name,"width=500,height=500,top=100,left=100");
+	return this.popupWindow = window.open(url,this.name,"width=600,height=600,top=100,left=100");
     },
     retryPopup: function(url,href) {
 	var f = this.retryPopupCalled;
@@ -56,7 +56,7 @@ libVES.Delegate = {
 	return !f && this.openPopup(url);
     },
     listener: function(evnt) {
-	if (evnt.origin == this.matchOrigin) try {
+	if (this.popupWindow && evnt.origin == this.matchOrigin) try {
 	    var msg = JSON.parse(evnt.data);
 	    var VES = this.VES;
 	    if (msg.externalId) {
