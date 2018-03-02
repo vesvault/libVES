@@ -49,7 +49,11 @@ libVES.Recovery.prototype = {
 					vi.get().then(function(data) {
 					    frnd.meta = data.meta;
 					    frnd.value = data.value;
-					}).catch(function(){})
+					}).catch(function(e) {
+					    return vi.getMeta().then(function(meta) {
+						frnd.meta = meta;
+					    });
+					})
 				    ]);
 				}));
 			    });
@@ -80,6 +84,11 @@ libVES.Recovery.prototype = {
 	    return tkns.map(function(v,i) {
 		return v.user;
 	    });
+	});
+    },
+    getOptions: function() {
+	return this.getTokens().then(function(tkns) {
+	    return tkns.length ? tkns[0].meta : null;
 	});
     },
     getFriendInfo: function(user) {

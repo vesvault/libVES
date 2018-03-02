@@ -84,6 +84,7 @@ libVES.prototype = {
 	return '';
     },
     login: function(passwd) {
+	if (this.token) return this.me();
 	var self = this;
 	return this.userMe = Promise.resolve(passwd).then(function(passwd) {
 	    return self.get('me',{sessionToken: true},{password: passwd}).then(function(data) {
@@ -326,8 +327,7 @@ libVES.prototype = {
 			else r = k.rekeyFrom(cur);
 		    } else r = k;
 		    me.currentVaultKey = me.activeVaultKeys = undefined;
-		    if (!cur 
-		    || !lost) me.vaultKeys = undefined;
+		    if (!cur || !lost) me.vaultKeys = undefined;
 		    return r;
 		}).then(function(r) {
 		    return r.post(undefined,undefined,options);
@@ -425,6 +425,7 @@ libVES.prototype = {
 		    me.shadowVaultKey = undefined;
 		    throw e;
 		}).then(function() {
+		    me.currentVaultKey = me.activeVaultKeys = undefined;
 		    return me.getShadowVaultKey();
 		});
 	    });
