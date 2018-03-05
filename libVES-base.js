@@ -117,7 +117,11 @@ libVES.prototype = {
 	    return vkey.unlock(Promise.resolve(veskey)).then(function(cryptoKey) {
 		if (!self.token && self.type == 'secondary') return vkey.getSessionToken().then(function(tkn) {
 		    self.token = tkn;
-		    return cryptoKey;
+		    return Promise.resolve(veskey).then(function(veskey) {
+			if (veskey) return vkey.reshareVESkey(veskey).catch(function(){});
+		    }).then(function() {
+			return cryptoKey;
+		    });
 		});
 		return cryptoKey;
 	    });
@@ -529,48 +533,52 @@ libVES.prototype = {
 	    });
 	});
     },
-    shareTempKeys: function() {
+    found: function(veskeys,vaultKeys) {
 	var self = this;
-	return self.me().then(function(me) {
-	    return me.getCreatedVaultKeys().then(function(vks) {
-		return Promise.all(vks.map(function(vk,i) {
-		    return vk.getUser().then(function(u) {
-			return u.getCurrentVaultKey().then(function(curr) {
-			    if (curr) return vk.getVaultItem().then(function(vi) {
-				return vi.getVaultEntries().then(function() {
-				    return curr.getId().then(function(id) {
-					if (!vi.vaultEntryByKey[id]) return vi.shareWith([u]);
-				    });
-				});
+	return Promise.resolve(veskeys).then(function(veskeys) {
+	    var chain = Promise.resolve(0);
+	    if (veskeys && !(veskeys instanceof Array)) veskeys = [veskeys];
+	    return (vaultKeys ? Promise.resolve(vaultKeys) : self.me().then(function(me) {
+		var rs = [];
+		return me.getVaultKeys().then(function(vaultKeys) {
+		    return Promise.all(vaultKeys.map(function(vaultKey,i) {
+			return vaultKey.getType().then(function(t) {
+			    switch (t) {
+				case 'temp': case 'lost': case 'recovery': rs.push(vaultKey);
+			    }
+			});
+		    }));
+		}).then(function() {
+		    return rs;
+		});
+	    })).then(function(vaultKeys) {
+		if (!(vaultKeys instanceof Array)) vaultKeys = [vaultKeys];
+		return Promise.all(vaultKeys.map(function(vaultKey,i) {
+		    return vaultKey.getRecovery().then(function(rcv) {
+			return rcv.unlock();
+		    }).catch(function(e) {
+			var rs = vaultKey.unlock();
+			if (veskeys) veskeys.map(function(veskey,i) {
+			    rs = rs.catch(function() {
+				return vaultKey.unlock(veskey);
 			    });
 			});
-		    });
+			return rs;
+		    }).then(function() {
+			chain = chain.then(function(ct) {
+			    return vaultKey.rekey().then(function() {
+				if (self.onRekey) return self.onRekey(vaultKey);
+			    }).then(function() {
+				return ct + 1;
+			    });
+			}).catch(function(e) {console.log(e);});;
+		    }).catch(function() {});
 		}));
+	    }).then(function() {
+		return chain;
 	    });
-	});
-    },
-    rekeyTempKeys: function() {
-	var self = this;
-	return self.me().then(function(me) {
-	    return me.getVaultKeys().then(function(vks) {
-		return Promise.all(vks.map(function(vk,i) {
-		    return vk.getType().then(function(t) {
-			switch (t) {
-			    case 'temp':
-				return vk.unlock().then(function() {
-				    return vk.getExternals().then(function(ex) {
-					return (ex.length ? self.getSecondaryKey(ex,true) : self.getCurrentKey()).then(function(curr) {
-					    return curr.rekeyTo(vk).then(function() {
-					        return vk.delete();
-					    });
-					});
-				    });
-				}).catch(function() {
-				});
-			}
-		    });
-		}));
-	    });
+	}).then(function(ct) {
+	    if (ct) return ct + self.found();
 	});
     },
     getMyRecoveries: function() {

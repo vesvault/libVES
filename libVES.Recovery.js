@@ -168,33 +168,22 @@ libVES.Recovery.prototype = {
     revoke: function() {
 	return this._assist(false);
     },
-    _recover: function() {
+    unlock: function() {
 	var self = this;
 	return self.getTokens().then(function(tkns) {
 	    var vtkns = [];
 	    for (var i = 0; i < tkns.length; i++) if (tkns[i].value != null) vtkns.push(tkns[i]);
 	    if (vtkns.length) return libVES.getModule(libVES,['Scramble','algo',vtkns[0].meta.v]).then(function(sc) {
 		return new sc(vtkns[0].meta.n).implode(vtkns,function(secret) {
-		    return self.vaultKey.unlock(secret).then(function() {
-			return self.vaultKey.getUser().then(function(user) {
-			    return user.getActiveVaultKeys().then(function(vaultKeys) {
-				return Promise.all(vaultKeys.map(function(vaultKey,i) {
-				    return vaultKey.getVaultEntries().then(function() {
-					return vaultKey.rekeyFrom(self.vaultKey);
-				    });
-				})).then(function(vaultKeys) {
-				    return user.setField('vaultKeys',vaultKeys).then(function() {
-					return user.post().then(function() {
-					    user.vaultKeys = undefined;
-					    return true;
-					});
-				    });
-				});
-			    });
-			});
-		    });
+		    return self.vaultKey.unlock(secret);
 		});
 	    });
+	});
+    },
+    _recover: function() {
+	var self = this;
+	return self.unlock().then(function() {
+	    return self.vaultKey.rekey();
 	});
     },
     recover: function() {

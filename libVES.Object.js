@@ -279,7 +279,7 @@ libVES.VaultKey.prototype = new libVES.Object({
     fieldList: {id: true, algo: true, type: true, publicKey: true, privateKey: true},
     fieldClass: {user: libVES.User, vaultItems: libVES.VaultItem, externals: libVES.External, sharedKeys: libVES.VaultKey},
     fieldExtra: {user: true, vaultItems: true},
-    fieldSets: [{vaultEntries: {id: true, encData: true, vaultItem: {id: true}}}],
+    fieldSets: [{vaultEntries: {id: true, encData: true, vaultItem: {id: true}}},{type: true, algo: true, publicKey: true}],
     getAlgo: function() {
 	return this.getField('algo');
     },
@@ -465,6 +465,29 @@ libVES.VaultKey.prototype = new libVES.Object({
 	    return self;
 	});
     },
+    rekey: function() {
+	var self = this;
+	return self.getUser().then(function(user) {
+	    return self.getExternals().then(function(exts) {
+		return (exts && exts.length ? exts[0].toRef() : Promise.resolve(user)).then(function(ref) {
+		    return self.VES.usersToKeys([ref]);
+		});
+	    }).then(function(keys) {
+		return Promise.all(keys.map(function(key,i) {
+		    return key.getVaultEntries().then(function() {
+			return key.rekeyFrom(self);
+		    });
+		}));
+	    }).then(function(keys) {
+		return user.setField('vaultKeys',keys).then(function() {
+		    return user.post(null,{vaultEntries: true}).then(function(data) {
+			self.setFields(data,false);
+			return self;
+		    });
+		});
+	    });
+	});
+    },
     getRecovery: function() {
 	var self = this;
 	return self.getType().then(function(t) {
@@ -480,6 +503,18 @@ libVES.VaultKey.prototype = new libVES.Object({
 	return this.getField('encSessionToken').then(function(tk) {
 	    return self.decrypt(tk).then(function(b) {
 		return libVES.Util.ByteArrayToString(b);
+	    });
+	});
+    },
+    reshareVESkey: function(veskey) {
+	var self = this;
+	return self.getVaultItems().then(function(vaultItems) {
+	    return self.getUser().then(function(user) {
+		return Promise.all(vaultItems.map(function(vaultItem,i) {
+		    return vaultItem.getType().then(function(t) {
+			if (t == 'password') return vaultItem.reshareWith([user],veskey);
+		    });
+		}));
 	    });
 	});
     },
@@ -576,7 +611,7 @@ libVES.VaultItem.prototype = new libVES.Object({
 			return k.getId().then(function(k_id) {
 			    k_used[k_id] = true;
 			    return k_ves[k_id];
-			});
+			}).catch(function(){});
 		    })).then(function(old_ves) {
 			for (var k_id in k_ves) if (!k_used[k_id]) old_ves.push(k_ves[k_id]);
 			return old_ves;
@@ -591,12 +626,13 @@ libVES.VaultItem.prototype = new libVES.Object({
 			    });
 			}));
 		    })).then(function() {
-			return Promise.all(old_ves.map(function(ve,j) {
-			    if (j >= ks.length) return (new libVES.VaultKey(ve.vaultKey,self.VES)).matchVaults(ks).then(function(f) {
+			return Promise.all(old_ves.slice(ks.length).map(function(ve,j) {
+			    return (new libVES.VaultKey(ve.vaultKey,self.VES)).matchVaults(ks).then(function(f) {
 				if (f === false) set_ves.push({vaultKey: ve.vaultKey, '$op': 'delete'});
 			    });
 			}));
 		    }).then(function() {
+			if (!set_ves.length) return save = false;
 			return self.setField('vaultEntries',set_ves);
 		    });
 		});
@@ -606,6 +642,25 @@ libVES.VaultItem.prototype = new libVES.Object({
 		return self;
 	    });
 	    return self;
+	});
+    },
+    reshareWith: function(share,val,save) {
+	var self = this;
+	return self.VES.usersToKeys(share).then(function(new_ks) {
+	    return self.getShareVaultKeys().then(function(curr_ks) {
+		return Promise.all(curr_ks.map(function(k,i) {
+		    return k.getId();
+		})).then(function(curr_ids) {
+		    var m_curr_ks = {};
+		    for (var i = 0; i < curr_ks.length; i++) m_curr_ks[curr_ids[i]] = curr_ks[i];
+		    return Promise.all(new_ks.map(function(k,i) {
+			return k.getId();
+		    })).then(function(new_ids) {
+			for (var i = 0; i < new_ks.length; i++) if (!m_curr_ks[new_ids[i]]) curr_ks.push(m_curr_ks[new_ids[i]] = new_ks[i]);
+			return self.shareWith(curr_ks,val,save);
+		    });
+		});
+	    });
 	});
     },
     getShareVaultKeys: function() {
@@ -638,36 +693,6 @@ libVES.VaultItem.prototype = new libVES.Object({
 	    });
 	});
     }
-/*
-    getShareList: function() {
-	var self = this;
-	return this.getVaultEntries().then(function(vaultEntries) {
-	    var vaultKeys = vaultEntries.map(function(e,i) {
-		return new libVES.VaultKey(e.vaultKey,self.VES);
-	    });
-	    return Promise.all(vaultKeys.map(function(e,i) {
-		return e.getExternals();
-	    })).then(function(extArray) {
-		var rs = [];
-		var users = [];
-		for (var i = 0; i < extArray.length; i++) {
-		    if (extArray[i] && extArray[i].length) for (var j = 0; j < extArray[i].length; j++) rs.push(extArray[i][j]);
-		    else users.push(vaultKeys[i].getUser());
-		}
-		return Promise.all(users).then(function(uArray) {
-		    return Promise.all(uArray.map(function(e,i) {
-			return e.getId();
-		    })).then(function(uidArray) {
-			var uMap = {};
-			for (var i = 0; i < uidArray.length; i++) uMap[uidArray[i]] = uArray[i];
-			for (var uid in uMap) rs.push(uMap[uid]);
-			return rs;
-		    });
-		});
-	    });
-	});
-    }
-*/
 });
 libVES.VaultItem.Type = {
     _detect: function(data) {
@@ -729,5 +754,10 @@ libVES.External.prototype = new libVES.Object({
     },
     getExternalId: function() {
 	return this.getField('externalId');
+    },
+    toRef: function() {
+	return Promise.all([this.getDomain(),this.getExternalId()]).then(function(r) {
+	    return {domain: r[0], externalId: r[1]};
+	});
     }
 });
