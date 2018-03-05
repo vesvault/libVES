@@ -614,62 +614,6 @@ libVES.prototype = {
 		});
 	    });
 	});
-    },
-    watch: function() {
-	var self = this;
-	return this.me().then(function(me) {
-	    return me.loadFields({
-		vaultKeys: {
-		    id: true,
-		    type: true,
-		    algo: true,
-		    vaultItem: {
-			vaultEntries: {
-			    vaultKey: true,
-			    encData: true
-			}
-		    }
-		},
-		createdVaultKeys: {
-		    id: true,
-		    type: true,
-		    algo: true,
-		    creator: {
-			id: true,
-			currentVaultKey: {
-			    id: true,
-			    type: true,
-			    algo: true,
-			    publicKey: true
-			}
-		    },
-		    vaultItem: {
-			vaultEntries: {
-			    vaultKey: true,
-			    encData: true
-			}
-		    }
-		}
-	    },true,{
-		abortFn: function(callbk) {
-		    self.watchAbortFn = callbk;
-		},
-		poll: 120
-	    }).then(function() {
-		return Promise.all([
-		    self.shareTempKeys(),
-		    self.rekeyTempKeys()
-		]);
-	    }).catch(function() {
-	    }).then(function() {
-		self.watchTmOut = window.setTimeout(self.watch.bind(self),1500);
-	    });
-	});
-    },
-    abort: function() {
-	window.clearTimeout(this.watchTmOut);
-	if (this.watchAbortFn) this.watchAbortFn();
-	this.watchAbortFn = null;
     }
 };
 
