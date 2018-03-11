@@ -100,13 +100,13 @@ libVES.Object.prototype = {
     getId: function() {
 	return this.id ? Promise.resolve(this.id) : this.getField('id');
     },
-    postData: function(fields,refs) {
-	if (refs) for (var k in refs) if (refs[k] === this) return Promise.resolve({"$ref": k});
+    postData: function(fields,refs,parent) {
+	if (refs && parent) for (var k in refs) if (refs[k] === this) return Promise.resolve({"$ref": k});
 	var data = {};
 	var prs = [];
 	var self = this;
 	var fmt = function(v,a) {
-	    if (v instanceof libVES.Object) return v.postData(a,refs);
+	    if (v instanceof libVES.Object) return v.postData(a,refs,self);
 	    else if (v instanceof Array) return Promise.all(v.map(function(vv,i) {
 		return fmt(vv,a);
 	    }));
@@ -469,18 +469,24 @@ libVES.VaultKey.prototype = new libVES.Object({
 	var self = this;
 	return self.getUser().then(function(user) {
 	    return self.getExternals().then(function(exts) {
-		return (exts && exts.length ? exts[0].toRef() : Promise.resolve(user)).then(function(ref) {
+		return (exts && exts.length ? exts[0].toRef().then(function(ext) {
+		    ext.user = user;
+		    return ext;
+		}) : Promise.resolve(user)).then(function(ref) {
 		    return self.VES.usersToKeys([ref]);
 		});
 	    }).then(function(keys) {
 		return Promise.all(keys.map(function(key,i) {
-		    return key.getVaultEntries().then(function() {
+		    return key.getVaultEntries().catch(function(e) {
+			if (e.code != 'NotFound') throw e;
+			key.vaultEntries = undefined;
+		    }).then(function() {
 			return key.rekeyFrom(self);
 		    });
 		}));
 	    }).then(function(keys) {
 		return user.setField('vaultKeys',keys).then(function() {
-		    return user.post(null,{vaultEntries: true}).then(function(data) {
+		    return user.post(null,{vaultEntries: true},{refs: {'#/': user}}).then(function(data) {
 			self.setFields(data,false);
 			return self;
 		    });

@@ -249,9 +249,17 @@ libVES.prototype = {
 		})).catch(function(e) {
 		    throw new libVES.Error('NotFound','No matching secondary key (domain:' + ext.domain + ', externalId:' + ext.externalId + '). Supply "user" to create the temp key, or define libVES.Domain.' + ext.domain + '.vaultRefToUser(vaultRef) to return matching libVES.User',{error: e});
 		}).then(function(u) {
-		    return self.createTempKey(self._matchUser(u)).then(function(vkey) {
-			return vkey.setField('externals',exts).then(function() {
-			    return vkey;
+		    return self.me().then(function(me) {
+			return Promise.all([me.getId(),u.getId()]).then(function(ids) {
+			    if (ids[0] == ids[1]) return self.getSecondaryKey(exts,true);
+			}).catch(function(e) {
+			    if (e != 'NotFound') throw e;
+			}).then(function(rs) {
+			    return rs || self.createTempKey(self._matchUser(u)).then(function(vkey) {
+				return vkey.setField('externals',exts).then(function() {
+				    return vkey;
+				});
+			    });
 			});
 		    });
 		});

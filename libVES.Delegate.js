@@ -10,8 +10,8 @@ libVES.Delegate = {
 	+ '<div style="min-width:320px;max-width:640px;;background-color:white;margin: auto;padding: 30px;">'
 	+ '<p>Use the VESvault popup window to grant access to the App Vault</p>'
 	+ '<p class="VESvaultDelegateBlockerMsg" style="color: #bf7f00; font-style:italic;">&nbsp;</p>'
-	+ '<p><a href="{$url}" target="VESvaultDelegate" onclick="return !libVES.Delegate.retryPopup(this.href,this)">Click here</a> if you can\'t see VESvault popup window</p>'
-	+ '<p><a href="#" onclick="libVES.Delegate.cancel(); return false;">Cancel</a></p>'
+	+ '<p><a class="VESvaultDelegateRetryLnk" href="{$url}" target="VESvaultDelegate" onclick="return !libVES.Delegate.retryPopup(this.href,this)">Click here</a> if you can\'t see VESvault popup window</p>'
+	+ '<p><a class="VESvaultDelegateCancelLnk" href="#" onclick="libVES.Delegate.cancel(); return false;">Cancel</a></p>'
 	+ '</div></div></div></div>',
     htmlBlockerMsg: 'Looks like your browser is using a popup blocker...',
     name: 'VESvaultDelegate',
@@ -32,6 +32,15 @@ libVES.Delegate = {
 	    self.popup.innerHTML = self.html.replace('{$url}',url);
 	    document.getElementsByTagName('BODY')[0].appendChild(self.popup);
 	    self.retryPopupCalled = 0;
+	    try {
+		document.getElementsByClassName('VESvaultDelegateRetryLnk')[0].onclick = function() {
+		    return !libVES.Delegate.retryPopup(this.href,this);
+		};
+		document.getElementsByClassName('VESvaultDelegateCancelLnk')[0].onclick = function() {
+		    libVES.Delegate.cancel();
+		    return false;
+		};
+	    } catch(e) {}
 	    if (!self.openPopup(url)) try {
 		document.getElementsByClassName('VESvaultDelegateBlockerMsg')[0].innerHTML = self.htmlBlockerMsg;
 	    } catch(e) {
@@ -39,6 +48,7 @@ libVES.Delegate = {
 	    }
 	    window.addEventListener('message',self.listener.bind(self));
 	    window.addEventListener('focus',self.chkCancel.bind(self));
+	    window.addEventListener('beforeunload',self.cancel.bind(self));
 	    window.clearInterval(self.popupInterval);
 	    self.popupInterval = window.setInterval(self.chkCancel.bind(self),1000);
 	});
