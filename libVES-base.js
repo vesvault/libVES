@@ -498,6 +498,16 @@ libVES.prototype = {
 	    return vaultItem.shareWith(shareWith);
 	});
     },
+    fileExists: function(fileRef) {
+	return this.getFileItem(fileRef).then(function(vaultItem) {
+	    return vaultItem.getId().then(function(id) {
+		return true;
+	    }).catch(function(e) {
+		if (e.code == 'NotFound') return false;
+		throw e;
+	    });
+	});
+    },
     deleteFile: function(fileRef) {
 	return this.getFile(fileRef).then(function(file) {
 	    return file.delete();

@@ -1,13 +1,16 @@
 ## libVES
-A JavaScript interface to VESvault REST API - Alpha.
+
+A JavaScript interface to VESvault REST API (beta).
+
+libVES user WebCrypto end-to-end encryption.
 
 https://VESvault.com
 
-Encryption at rest made practical
+https://VES.host
 
-- End To End encryption key management
-- End To End encrypted item management
-- Viral Encrypted Security (VES): Safe and reliable recovery of encrypted data in case of losing the encryption key
+- Deposit and retrieve encrypted items into VESvault repository using end-to-end encryption
+- Manage asymmetric encryption keys in the VESvault repository using end-to-end encryption
+- [VESrecovery](https://www.vesvault.com/#vault)™ operations: set VESrecovery friends, assist in VESrecovery
 
 Run Makefile.pl to generate a consolidated js file, and a minified version of it.
 
