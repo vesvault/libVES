@@ -627,7 +627,10 @@ libVES.VaultItem.prototype = new libVES.Object({
 		    var set_ves = [];
 		    return Promise.all(ks.map(function(k,j) {
 			return new_ves[j] = (old_ves[j] || k.encrypt(v).then(function(ctext) {
-			    return k.postData(null,libVES.Object._refs).then(function(pd) {
+			    return (function(refs) {
+				if (refs) for (var i in refs) if (refs[i] === k) return Promise.resolve({'$ref':i});
+				return k.postData(null,refs);
+			    })(libVES.Object._refs).then(function(pd) {
 				return set_ves.push({vaultKey: pd, encData: ctext});
 			    });
 			}));
