@@ -23,7 +23,7 @@ libVES.prototype = {
     wwwUrl: 'https://www.vesvault.com/',
 //    e2e: ['signal'],
     keyAlgo: 'RSA',
-    textCipher: 'AES256CBC',
+    textCipher: 'AES256GCMp',
     defaultHash: 'SHA256',
     
     request: function(method,uri,body,optns) {

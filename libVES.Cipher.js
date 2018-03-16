@@ -51,7 +51,7 @@ libVES.Cipher.prototype = {
 	}
 	var p = final ? buf.byteLength : (chunkSize ? Math.floor(buf.byteLength / chunkSize) * chunkSize : 0);
 	this.processBuf = p < buf.byteLength ? buf.slice(p) : null;
-	return p > 0 ? callbk(buf.slice(0,p)) : Promise.resolve(new Uint8Array(0));
+	return p > 0 || final ? callbk(buf.slice(0,p)) : Promise.resolve(new Uint8Array(0));
     },
     encryptChunk: function(buf) {
 	return Promise.all([this.key,this.algoInfo()]).then(function(info) {
@@ -74,28 +74,37 @@ libVES.Cipher.prototype = {
     }
 };
 
-libVES.Cipher.AES256 = function(rec) {
-    this.init(rec);
+libVES.Cipher.AES = function(data) {
+    for (var k in data) this[k] = data[k];
 };
 
 libVES.Cipher.AES256CBC = function(rec) {
     this.init(rec);
 };
 
-libVES.Cipher.AES256.prototype = new libVES.Cipher({
-    keySize: 32,
-    ivSize: 32
-});
+libVES.Cipher.AES256GCM = function(rec) {
+    this.init(rec);
+};
 
-libVES.Cipher.AES256CBC.prototype = new libVES.Cipher({
-    algo: 'AES-CBC',
+libVES.Cipher.AES256GCMp = function(rec) {
+    this.init(rec);
+};
+
+libVES.Cipher.AES.prototype = new libVES.Cipher({
     keySize: 32,
-    ivSize: 16,
+    ivSize: 32,
     algoInfo: function() {
+	var self = this;
 	return this.IV.then(function(iv) {
-	    return {name: 'AES-CBC', iv: iv};
+	    return {name: self.algo, iv: iv};
 	});
     }
+});
+
+libVES.Cipher.AES256CBC.prototype = new libVES.Cipher.AES({
+    algo: 'AES-CBC',
+    keySize: 32,
+    ivSize: 16
 });
 
 libVES.Cipher.AES256CBC.import = function(args,chain,optns) {
@@ -115,3 +124,30 @@ libVES.Cipher.AES256CBC.export = function(chain,optns) {
 libVES.Cipher.AES256CBC.info = function(chain,optns) {
     return Promise.resolve({algorithm: {name: 'AES-CBC', length: 256}});
 };
+
+libVES.Cipher.AES256GCM.prototype = new libVES.Cipher.AES({
+    algo: 'AES-GCM',
+    keySize: 32,
+    ivSize: 12
+});
+
+libVES.Cipher.AES256GCMp.prototype = new libVES.Cipher.AES({
+    algo: 'AES-GCM',
+    keySize: 32,
+    ivSize: 12,
+    padSize: 32,
+    encryptChunk: function(buf0) {
+	var buf = new Uint8Array(buf0);
+	var pad = this.padSize - (buf.byteLength % this.padSize) - 1;
+	var bufp = new Uint8Array(buf.byteLength + pad + 1);
+	bufp[0] = pad;
+	bufp.set(buf,1);
+	return libVES.Cipher.prototype.encryptChunk.call(this,bufp);
+    },
+    decryptChunk: function(buf) {
+	return libVES.Cipher.prototype.decryptChunk.call(this,buf).then(function(bufp0) {
+	    var bufp = new Uint8Array(bufp0);
+	    return bufp.slice(1,bufp.byteLength - bufp[0]);
+	});
+    }
+});

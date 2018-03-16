@@ -534,7 +534,7 @@ libVES.VaultItem.prototype = new libVES.Object({
     fieldList: {id: true},
     fieldClass: {vaultKey: libVES.VaultKey, file: libVES.File},
     fieldSets: [{type: true, meta: true},{vaultEntries: {id: true, encData: true, vaultKey: {id: true}}},{vaultKey: true, file: true, lockbox: true}],
-    defaultCipher: 'AES256',
+    defaultCipher: 'AES256GCM',
     getRaw: function() {
 	var self = this;
 	return self.VES.getVaultKeysById().then(function(vaultKeys) {
