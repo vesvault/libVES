@@ -5,48 +5,151 @@
  * GPL license, http://www.gnu.org/licenses/
  */
 libVES.Algo = {
-    RSA: {
-	tag: 'RSA',
+    ECDH: {
+	tag: 'ECDH',
 	decrypt: function(k,buf) {
-	    return crypto.subtle.decrypt('RSA-OAEP',k,buf);
+	    var b = new Uint8Array(buf);
+	    var data = libVES.Util.ASN1.decode(b);
+	    if (!data || data.length < 2) throw new libVES.Error('InvalidValue','Error parsing ECIES: Invalid ciphertext?');
+	    return libVES.Util.ASN1.import(b.slice(0,b.byteLength - data[1].byteLength),{decoded:data[0]}).then(function(eKey) {
+		return libVES.Algo.ECDH.cipher(k,eKey).then(function(ci) {
+		    return ci.decrypt(data[1],true).catch(function(e) {
+			if (e instanceof libVES.Error) throw e;
+			throw new libVES.Error('InvalidValue','Error decrypting ECIES payload: Invalid ciphertext?',{error:e});
+		    });
+		}).catch(function(e) {
+		    if (e instanceof libVES.Error) throw e;
+		    throw new libVES.Error('InvalidValue','Error negotiating DH cipher key: Invalid ciphertext?',{error:e});
+		});
+	    }).catch(function(e) {
+		if (e instanceof libVES.Error) throw e;
+		throw new libVES.Error('InvalidValue','Error loading EC ephemeral: Invalid ciphertext?',{error:e});
+	    });
 	},
 	encrypt: function(k,buf) {
-	    return crypto.subtle.encrypt('RSA-OAEP',k,buf);
+	    return libVES.Algo.ECDH.eKey(k).then(function(eKey) {
+		return libVES.Algo.ECDH.cipher(eKey.privateKey,k).then(function(ci) {
+		    return Promise.all([
+			crypto.subtle.exportKey('spki',eKey.publicKey),
+			ci.encrypt(buf,true)
+		    ]).then(function(bufs) {
+			var buf = new Uint8Array(bufs[0].byteLength + bufs[1].byteLength);
+			buf.set(new Uint8Array(bufs[0]),0);
+			buf.set(new Uint8Array(bufs[1]),bufs[0].byteLength);
+			return buf;
+		    });
+		}).catch(function(e) {
+		    if (e instanceof libVES.Error) throw e;
+		    throw new libVES.Error('InvalidValue','Error generating ECIES DH cipher',{error:e});
+		});
+	    });
+	},
+	eKey: function(pub) {
+	    return crypto.subtle.exportKey('jwk',pub).then(function(kdata) {
+		return crypto.subtle.generateKey({name:'ECDH',namedCurve: kdata.crv},true,['deriveKey','deriveBits']).catch(function(e) {
+		    throw new libVES.Error('InvalidValue','Error generating ECIES ephemeral',{error: e});
+		});
+	    });
+	},
+	cipher: function(priv,pub) {
+	    return libVES.getModule(libVES.Cipher,'AES256GCMp').then(function(m) {
+		return Promise.resolve(libVES.Algo.ECDH.curveBytes[pub.algorithm.namedCurve] || crypto.subtle.exportKey('jwk',pub).then(function(jwk) {
+		    return jwk.x.length * 3 / 4;
+		})).then(function(len) {
+		    return crypto.subtle.deriveBits({name:'ECDH',public:pub},priv,8 * len).then(function(raw) {
+			return crypto.subtle.digest({name:'SHA-384'},raw).then(function(buf) {
+			    return new m(new Uint8Array(buf).slice(0,m.prototype.keySize + m.prototype.ivSize));
+			});
+		    });
+		});
+	    });
+	},
+	curveBytes: {
+	    'P-256': 32,
+	    'P-384': 48,
+	    'P-521': 66
 	},
 	import: function(data,optns) {
 	    return libVES.Util.PEM.import(data,optns);
 	},
 	export: function(data,optns) {
 	    if (data instanceof CryptoKey) switch (data.type) {
-		case 'private':
-		    var ops = {};
-		    for (var k in optns) ops[k] = optns[k];
-		    if (!ops.members) ops.members = [
-			libVES.getModule(libVES.Util,'PBKDF2'),
-			libVES.getModule(libVES.Cipher,'AES256CBC')
-		    ];
-		    return Promise.all(ops.members).then(function(ms) {
-			ops.members = ms;
-			return crypto.subtle.exportKey('pkcs8',data).then(function(der) {
-			    ops.content = der;
-			    var rec = [];
-			    if (ops.password) return libVES.Util.PKCS5.export(function(call,optns) {
-				rec[1] = optns.content;
-				return Promise.resolve();
-			    },ops).then(function(data) {
-				rec[0] = data;
-				return libVES.Util.PEM.encode(libVES.Util.ASN1.encode([rec]),'ENCRYPTED PRIVATE KEY');
-			    });
-			    else if (ops.opentext) return crypto.subtle.exportKey('pkcs8',data).then(function(der) {
-				return libVES.Util.PEM.encode(der,'PRIVATE KEY');
-			    });
-			    else throw libVES.Error('Internal','No password for key export (opentext=true to export without password?)');
-			});
-		    });
-		case 'public':
-		    return crypto.subtle.exportKey('spki',data).then(function(der) {
-			return libVES.Util.PEM.encode(der,'PUBLIC KEY');
-		    });
+		case 'private': return libVES.Util.PKCS8.encode(data,optns);
+		case 'public': return libVES.Util.PKCS1.encode(data,optns);
+	    }
+	    throw new libVES.Error('Internal',"Unknown type of key object");
+	},
+	generate: function(optns) {
+	    var op = {name:'ECDH', namedCurve:'P-521'};
+	    if (optns) for (var k in optns) op[k] = optns[k];
+	    return crypto.subtle.generateKey(op,true,['deriveKey','deriveBits']);
+	},
+	getPublic: function(priv) {
+	    return crypto.subtle.exportKey('jwk',priv).then(function(k) {
+		return crypto.subtle.importKey('jwk',{
+		    crv: k.crv,
+		    ext: true,
+		    key_ops: [],
+		    kty: 'EC',
+		    x: k.x,
+		    y: k.y
+		},{name:'ECDH'},true,[]);
+	    });
+	}
+    },
+    RSA: {
+	tag: 'RSA',
+	decrypt: function(k,buf) {
+	    var self = libVES.Algo.RSA;
+	    var maxl = (k.algorithm.modulusLength + 7) >> 3;
+	    if (buf.byteLength <= maxl) return self.decryptRSA(k,buf);
+	    var b = new Uint8Array(buf);
+	    return self.decryptRSA(k,b.slice(0,maxl)).then(function(ck) {
+		return self.cipher(ck).then(function(ci) {
+		    return ci.decrypt(b.slice(maxl),true);
+		});
+	    });
+	},
+	decryptRSA: function(k,buf) {
+	    return crypto.subtle.decrypt('RSA-OAEP',k,buf).catch(function(e) {
+		throw new libVES.Error('InvalidValue','Error decrypting RSA OAEP: Invalid ciphertext?',{error:e});
+	    });
+	},
+	encrypt: function(k,buf) {
+	    var self = libVES.Algo.RSA;
+	    var maxl = ((k.algorithm.modulusLength + 7) >> 3) - 48;
+	    if (buf.byteLength <= maxl) return self.encryptRSA(k,buf);
+	    return self.cipher().then(function(ci) {
+		return Promise.all([
+		    ci.getSecret().then(function(sk) {
+			return self.encryptRSA(k,sk);
+		    }),
+		    ci.encrypt(buf,true)
+		]).then(function(bufs) {
+		    var rs = new Uint8Array(bufs[0].byteLength + bufs[1].byteLength);
+		    rs.set(new Uint8Array(bufs[0]),0);
+		    rs.set(new Uint8Array(bufs[1]),bufs[0].byteLength);
+		    return rs;
+		});
+	    });
+	},
+	encryptRSA: function(k,buf) {
+	    return crypto.subtle.encrypt('RSA-OAEP',k,buf).catch(function(e) {
+		throw new libVES.Error('InvalidValue','Error encrypting RSA OAEP: Buffer is too long?',{error:e});
+	    });;
+	},
+	cipher: function(secret) {
+	    return libVES.getModule(libVES.Cipher,'AES256GCMp').then(function(cls) {
+		return new cls(secret);
+	    });
+	},
+	import: function(data,optns) {
+	    return libVES.Util.PEM.import(data,optns);
+	},
+	export: function(data,optns) {
+	    if (data instanceof CryptoKey) switch (data.type) {
+		case 'private': return libVES.Util.PKCS8.encode(data,optns);
+		case 'public': return libVES.Util.PKCS1.encode(data,optns);
 	    }
 	    throw new libVES.Error('Internal',"Unknown type of key object");
 	},
@@ -67,7 +170,6 @@ libVES.Algo = {
 		},{name:'RSA-OAEP',hash:'SHA-1'},true,['encrypt']);
 	    });
 	}
-	
     },
     RSA_PKCS1_15: {
 	tag: 'RSA_PKCS1_15',

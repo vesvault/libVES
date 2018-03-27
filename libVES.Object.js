@@ -389,10 +389,12 @@ libVES.VaultKey.prototype = new libVES.Object({
 	    self.setField('algo',wc.engine.tag);
 	    if (!wc.privateKey) throw new libVES.Error('InvalidValue','Private key expected');
 	    return wc;
-	}) : this.engine().then(function(e) {
-	    return e.generate(optns).then(function(ks) {
-		ks.engine = e;
-		return ks;
+	}) : (optns && optns.algo ? self.setField('algo',optns.algo) : Promise.resolve()).then(function() {
+	    return self.engine().then(function(e) {
+		return e.generate(optns).then(function(ks) {
+		    ks.engine = e;
+		    return ks;
+		});
 	    });
 	});
 	return Promise.resolve(veskey).then(function(v) {

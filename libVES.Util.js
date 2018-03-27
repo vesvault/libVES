@@ -98,7 +98,7 @@ libVES.Util = {
 	}
     },
     ASN1: {
-	decode: function(der) {
+	decode: function(der,fStruct) {
 	    var p = 0;
 	    var data = function() {
 		var l = der[p++];
@@ -113,10 +113,14 @@ libVES.Util = {
 	    };
 	    var rs = [];
 	    for (; p < der.length;) {
+		if (!fStruct && p) {
+		    rs.push(der.slice(p));
+		    break;
+		}
 		var tag = der[p++];
 		switch (tag) {
 		    case 48:
-			rs.push(libVES.Util.ASN1.decode(data()));
+			rs.push(libVES.Util.ASN1.decode(data(),true));
 			break;
 		    case 6:
 			rs.push(new libVES.Util.OID(data()));
@@ -138,7 +142,7 @@ libVES.Util = {
 	    }
 	    return rs;
 	},
-	encode: function(data) {
+	encode: function(data,fStruct) {
 	    var i2a = function(v) {
 		if (v < 0) throw new libVES.Error('Internal',"Negative value for ASN.1 integer!");
 		var rs = [];
@@ -169,10 +173,10 @@ libVES.Util = {
 		return rs;
 	    };
 	    var d;
-	    for (var i = 0; i < data.length; i++) switch (typeof(d = data[i])) {
+	    for (var i = 0; i < data.length; i++) if (fStruct || !i) switch (typeof(d = data[i])) {
 		case 'object':
 		    if (d == null) buf(5,new Uint8Array(0));
-		    else if (d instanceof Array) buf(48,libVES.Util.ASN1.encode(d));
+		    else if (d instanceof Array) buf(48,libVES.Util.ASN1.encode(d,true));
 		    else if (d instanceof libVES.Util.OID) buf(6,d.getBuffer());
 		    else if (d instanceof Uint8Array || d instanceof ArrayBuffer) buf((d.ASN1type || 4),d);
 		    else throw new libVES.Error('Internal',"ASN.1 encode - Unknown type");
@@ -181,7 +185,7 @@ libVES.Util = {
 		    buf(2,i2a(d));
 		    break;
 		default: throw new libVES.Error('Internal',"ASN.1 encode - Unknown type");
-	    }
+	    } else bufs.push(d);
 	    var l = 0;
 	    for (var i = 0; i < bufs.length; i++) l += bufs[i].length;
 	    var der = new Uint8Array(l);
@@ -190,7 +194,7 @@ libVES.Util = {
 	    return der;
 	},
 	import: function(der,optns) {
-	    var k = libVES.Util.ASN1.decode(der)[0];
+	    var k = optns && optns.decoded || libVES.Util.ASN1.decode(der)[0];
 	    if (!k) throw new libVES.Error('Internal','Empty ASN.1 package?');
 	    var i = 0;
 	    if (typeof(k[i]) == 'number') (optns || (optns = {})).version = k[i++];
@@ -237,6 +241,11 @@ libVES.Util = {
 		    return crypto.subtle.importKey('pkcs8',der,{name:'RSA-OAEP', hash:'SHA-1'},true,['decrypt']);
 		});
 	    });
+	},
+	encode: function(key,optns) {
+	    return crypto.subtle.exportKey('spki',key).then(function(der) {
+		return libVES.Util.PEM.encode(der,'PUBLIC KEY');
+	    });
 	}
     },
     PKCS5: {
@@ -251,7 +260,8 @@ libVES.Util = {
 		else return fp;
 	    })(args[i],f);
 	    return f('import',optns).then(function(der) {
-		return crypto.subtle.importKey('pkcs8',der,{name:'RSA-OAEP', hash:'SHA-1'},true,['decrypt']);
+		return libVES.Util.ASN1.import(new Uint8Array(der));
+//		return crypto.subtle.importKey('pkcs8',der,{name:'RSA-OAEP', hash:'SHA-1'},true,['decrypt']);
 	    }).catch(function(e) {
 		throw new libVES.Error('InvalidKey',"Cannot import the private key (Invalid VESkey?)");
 	    });
@@ -270,6 +280,34 @@ libVES.Util = {
 	    })(optns.members[i],f,i);
 	    return f('export',optns).then(function() {
 		return [new libVES.Util.OID('1.2.840.113549.1.5.13'), args];
+	    });
+	}
+    },
+    PKCS8: {
+	encode: function(key,optns) {
+	    var ops = {};
+	    for (var k in optns) ops[k] = optns[k];
+	    if (!ops.members) ops.members = [
+		libVES.getModule(libVES.Util,'PBKDF2'),
+		libVES.getModule(libVES.Cipher,'AES256CBC')
+	    ];
+	    return Promise.all(ops.members).then(function(ms) {
+		ops.members = ms;
+		return crypto.subtle.exportKey('pkcs8',key).then(function(der) {
+		    ops.content = der;
+		    var rec = [];
+		    if (ops.password) return libVES.Util.PKCS5.export(function(call,optns) {
+			rec[1] = optns.content;
+			return Promise.resolve();
+		    },ops).then(function(data) {
+			rec[0] = data;
+			return libVES.Util.PEM.encode(libVES.Util.ASN1.encode([rec]),'ENCRYPTED PRIVATE KEY');
+		    });
+		    else if (ops.opentext) return crypto.subtle.exportKey('pkcs8',data).then(function(der) {
+			return libVES.Util.PEM.encode(der,'PRIVATE KEY');
+		    });
+		    else throw libVES.Error('Internal','No password for key export (opentext=true to export without password?)');
+		});
 	    });
 	}
     },
@@ -301,6 +339,21 @@ libVES.Util = {
 		    });
 		});
 	    });
+	}
+    },
+    EC: {
+	import: function(args,chain,optns) {
+	    return chain('container',optns).then(function(der) {
+		var a = {name:'ECDH',namedCurve:libVES.Util.EC.namedCurves[String(args)]};
+		return crypto.subtle.importKey('spki',der,a,true,[]).catch(function() {;
+		    return crypto.subtle.importKey('pkcs8',der,a,true,['deriveKey','deriveBits']);
+		});
+	    });
+	},
+	namedCurves: {
+	    "1.3.132.0.10": "P-256",
+	    "1.3.132.0.34": "P-384",
+	    "1.3.132.0.35": "P-521"
 	}
     },
     Hash: {
@@ -340,3 +393,4 @@ libVES.Util.OID['1.2.840.113549.1.5.13'] = libVES.getModuleFunc(libVES,['Util','
 libVES.Util.OID['1.2.840.113549.1.5.12'] = libVES.getModuleFunc(libVES,['Util','PBKDF2']);
 libVES.Util.OID['2.16.840.1.101.3.4.1.42'] = libVES.getModuleFunc(libVES,['Cipher','AES256CBC']);
 libVES.Util.OID['1.2.840.113549.1.1.1'] = libVES.getModuleFunc(libVES,['Util','PKCS1']);
+libVES.Util.OID['1.2.840.10045.2.1'] = libVES.getModuleFunc(libVES,['Util','EC']);
