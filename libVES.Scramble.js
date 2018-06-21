@@ -75,17 +75,20 @@ libVES.Scramble.RDX.prototype = {
     scramble: function(vec,b) {
 	return libVES.Math.mulv(vec,this.getCv(b));
     },
-    explode: function(sc,ct) {
+    explode: function(sc,ct,optns) {
 	var self = this;
 	return this.toVector(sc).then(function(v) {
 	    var bs = self.getBases(ct);
 	    var rs = [];
 	    for (i = 0; i < bs.length; i++) rs[i] = {
-		meta: {
+		meta: (function(m) {
+		    if (optns instanceof Object) for (var k in optns) if (m[k] === undefined) m[k] = optns[k];
+		    return m;
+		})({
 		    v: self.tag,
 		    n: self.size,
 		    b: bs[i]
-		},
+		}),
 		value: self.scramble(v,bs[i])
 	    }
 	    return rs;

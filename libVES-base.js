@@ -98,10 +98,10 @@ libVES.prototype = {
 	this.token = undefined;
 	return this.lock();
     },
-    delegate: function() {
+    delegate: function(optns) {
 	var self = this;
 	return libVES.getModule(libVES,'Delegate').then(function(dlg) {
-	    return dlg.login(self);
+	    return dlg.login(self,null,optns);
 	});
     },
     me: function() {
@@ -158,7 +158,7 @@ libVES.prototype = {
 	});
     },
     getVaultKeysById: function() {
-	if (!this.vaultKeysById) this.vaultKeysById = this.me().then(function(me) {
+	return this.me().then(function(me) {
 	    return me.getVaultKeys().then(function(vaultKeys) {
 		return Promise.all(vaultKeys.map(function(e,i) {
 		    return e.getId();
@@ -169,7 +169,6 @@ libVES.prototype = {
 		});
 	    });
 	});
-	return this.vaultKeysById;
     },
     getItems: function() {
 	var self = this;
@@ -414,7 +413,7 @@ libVES.prototype = {
 	var algo = optns.v ? libVES.Scramble.algo[optns.v] : libVES.Scramble.RDX;
 	if (!algo) return Promise.reject(new libVES.Error('InvalidValue','Unknown scramble algorithm: ' + optns.v));
 	var s = new algo(optns.n);
-	return s.explode(rkey,usrs.length).then(function(tkns) {
+	return s.explode(rkey,usrs.length,optns).then(function(tkns) {
 	    return self.me().then(function(me) {
 		me.activeVaultKeys = undefined;
 		return me.setField('shadowVaultKey',new libVES.VaultKey({type: 'shadow', user: me, algo: self.keyAlgo},self).generate(rkey,optns),false).then(function(k) {
@@ -437,7 +436,7 @@ libVES.prototype = {
 		    me.shadowVaultKey = undefined;
 		    throw e;
 		}).then(function() {
-		    me.currentVaultKey = me.activeVaultKeys = undefined;
+		    me.currentVaultKey = me.shadowVaultKey = me.activeVaultKeys = undefined;
 		    return me.getShadowVaultKey();
 		});
 	    });
