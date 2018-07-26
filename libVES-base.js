@@ -326,22 +326,37 @@ libVES.prototype = {
 	var self = this;
 	return this.me().then(function(me) {
 	    return (new libVES.VaultKey({type: 'current', algo: self.keyAlgo, user: me},self)).generate(Promise.resolve(veskey),options).then(function(k) {
-		return self.getVaultKey().then(function(cur) {
-		    var r;
-		    if (cur) {
-			if (lost) r = cur.setField('type','lost').then(function() {
+		return me.getVaultKeys().then(function(vkeys) {
+		    var cur = null;
+		    return Promise.all(vkeys.map(function(vkey,i) {
+			return vkey.getType().then(function(t) {
+			    switch (t) {
+				case 'current':
+				    cur = vkey;
+				case 'lost':
+				    return vkey.unlock().then(function() {
+					return k.rekeyFrom(vkey);
+				    }).catch(function(e) {});
+			    }
+			});
+		    })).then(function(d) {
+			var r;
+			if (cur && lost) r = cur.setField('type','lost').then(function() {
 			    k.user = undefined;
 			    return me.setField('vaultKeys',[cur,k]).then(function() {
 				return me;
 			    });
 			});
-			else r = k.rekeyFrom(cur);
-		    } else r = k;
-		    me.currentVaultKey = me.activeVaultKeys = undefined;
-		    if (!cur || !lost) me.vaultKeys = undefined;
-		    return r;
+			else r = k;
+			me.currentVaultKey = me.activeVaultKeys = undefined;
+			if (!cur || !lost) me.vaultKeys = undefined;
+			return r;
+		    });
 		}).then(function(r) {
 		    return r.post(undefined,undefined,options);
+		}).catch(function(e) {
+		    self.reset();
+		    throw e;
 		}).then(function(post) {
 		    return self.reset(post);
 		}).then(function() {
