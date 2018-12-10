@@ -1,18 +1,39 @@
-## libVES
+    /***************************************************************************
+     *          ___       ___
+     *         /   \     /   \    VESvault
+     *         \__ /     \ __/    Encrypt Everything without fear of losing the Key
+     *            \\     //                   https://vesvault.com https://ves.host
+     *             \\   //
+     *     ___      \\_//
+     *    /   \     /   \         libVES:                      VESvault API library
+     *    \__ /     \ __/
+     *       \\     //
+     *        \\   //
+     *         \\_//              - Key Management and Exchange
+     *         /   \              - Item Encryption and Sharing
+     *         \___/              - [VESrecovery](https://www.vesvault.com/#vault)™
+     *
+     *
+     * (c) 2018 VESvault Corp
+     * Jim Zubov <jz@vesvault.com>
+     *
+     * GNU General Public License v3
+     * You may opt to use, copy, modify, merge, publish, distribute and/or sell
+     * copies of the Software, and permit persons to whom the Software is
+     * furnished to do so, under the terms of the COPYING file.
+     *
+     * This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
+     * KIND, either express or implied.
+     *
+     ***************************************************************************/
 
-A JavaScript interface to VESvault REST API (beta).
+## libVES.js
 
-libVES user WebCrypto end-to-end encryption.
-
-https://VESvault.com
-
-https://VES.host
-
-- Deposit and retrieve encrypted items into VESvault repository using end-to-end encryption
-- Manage asymmetric encryption keys in the VESvault repository using end-to-end encryption
-- [VESrecovery](https://www.vesvault.com/#vault)™ operations: set VESrecovery friends, assist in VESrecovery
+A JavaScript end-to-end encryption API library.
 
 Run Makefile.pl to generate a consolidated js file, and a minified version of it.
+
+Run Makefile.bat on Windows to generate a working build.
 
 API Documentation:
 https://ves.host/docs/libVES
