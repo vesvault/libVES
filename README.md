@@ -11,7 +11,7 @@
      *        \\   //
      *         \\_//              - Key Management and Exchange
      *         /   \              - Item Encryption and Sharing
-     *         \___/              - [VESrecovery](https://www.vesvault.com/#vault)™
+     *         \___/              - VESrecovery™
      *
      *
      * (c) 2018 VESvault Corp
@@ -29,7 +29,7 @@
 
 ## libVES.js
 
-A JavaScript end-to-end encryption API library.
+A JavaScript end-to-end encryption API library with [VESrecovery](https://www.vesvault.com/#vault)™: Encrypt Everything without fear of losing the Key.
 
 Run Makefile.pl to generate a consolidated js file, and a minified version of it.
 
