@@ -121,10 +121,10 @@ libVES.Recovery.prototype = {
 	    return Promise.all(tkns.map(function(v,i) {
 		return v.user.getId();
 	    })).then(function(uids) {
-			return user.getId().then(function(uid) {
-				for (var i = 0; i < uids.length; i++) if (uids[i] == uid) return tkns[i];
-				throw new libVES.Error('InvalidValue','Not a friend: ' + uid);
-			});
+		return user.getId().then(function(uid) {
+		    for (var i = 0; i < uids.length; i++) if (uids[i] == uid) return tkns[i];
+		    throw new libVES.Error('InvalidValue','Not a friend: ' + uid);
+		});
 	    });
 	});
     },
@@ -147,22 +147,11 @@ libVES.Recovery.prototype = {
     getFriendsAssisted: function() {
 	var self = this;
 	return this.getTokens().then(function(tkns) {
-	    return Promise.all(tkns.map(function(v,i) {
-		return v.vaultItem.getVaultEntries().then(function() {
-		    return v.vaultEntryByKey;
-		});
-	    })).then(function(ves) {
-		return self.vaultKey.getUser().then(function(user) {
-		    return user.getCurrentVaultKey().then(function(vk) {
-			return vk.getId().then(function(vkid) {
-			    var rs = 0;
-			    for (var i = 0; i < ves.length; i++) if (ves[i]) if(ves[i][vkid]) rs++;
-			    return rs;
-			});
-		    });
-		});
+	    var a = 0;
+	    tkns.map(function(t, i) {
+		if (t.assisted) a++;
 	    });
-	    return tkns[0].meta.n;
+	    return a;
 	});
     },
     getFriendsToGo: function() {
@@ -187,7 +176,10 @@ libVES.Recovery.prototype = {
 	});
     },
     assist: function() {
-	return this._assist(true);
+	var self = this;
+	return self.vaultKey.getType().then(function(t) {
+	    return t == 'recovery' ? self._assist(true) : null;
+	});
     },
     revoke: function() {
 	return this._assist(false);

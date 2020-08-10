@@ -106,7 +106,10 @@ libVES.Scramble.RDX.prototype = {
 	    var rs = [];
 	    for (i = 0; i < bs.length; i++) rs[i] = {
 		meta: (function(m) {
-		    if (optns instanceof Object) for (var k in optns) if (m[k] === undefined) m[k] = optns[k];
+		    if (optns) {
+			if (optns.t != null) m.t = optns.t;
+			if (optns.shadow) for (var k in optns.shadow) m[k] = optns.shadow[k];
+		    }
 		    return m;
 		})({
 		    v: self.tag,

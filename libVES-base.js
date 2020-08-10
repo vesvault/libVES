@@ -45,7 +45,6 @@ if (!window.libVES) window.libVES = function(optns) {
 libVES.prototype = {
     apiUrl: 'https://api.ves.host/v1/',
     wwwUrl: 'https://www.vesvault.com/',
-//    e2e: ['signal'],
     keyAlgo: 'ECDH',
     textCipher: 'AES256GCMp',
     defaultHash: 'SHA256',
@@ -82,7 +81,7 @@ libVES.prototype = {
 	    if (body != null) xhr.setRequestHeader('Content-Type','application/json');
 	    xhr.setRequestHeader('Accept','application/json');
 	    if (this.user && optns.password) xhr.setRequestHeader('Authorization','Basic ' + btoa(this.user + ':' + optns.password));
-	    else if (this.token) xhr.setRequestHeader('Authorization','Bearer ' + this.token);
+	    else if (optns.token || this.token) xhr.setRequestHeader('Authorization','Bearer ' + (optns.token ? optns.token : this.token));
 	    xhr.responseType = 'json';
 	    xhr.send(body);
 	}.bind(this));
@@ -107,6 +106,18 @@ libVES.prototype = {
 	}
 	return '';
     },
+    elevateAuth: function(optns) {
+	var self = this;
+	if (optns && (optns.password || optns.token)) return Promise.resolve(optns);
+	return (optns && optns.authVaultKey ? Promise.resolve(optns.authVaultKey) : self.getVaultKey()).then(function(vkey) {
+	    return vkey.getSessionToken().then(function(tkn) {
+		if (!tkn) return optns;
+		var o = {token: tkn};
+		if (optns) for (var k in optns) o[k] = optns[k];
+		return o;
+	    });
+	});
+    },
     login: function(passwd) {
 	if (this.token) return this.me();
 	var self = this;
@@ -126,6 +137,20 @@ libVES.prototype = {
 	var self = this;
 	return libVES.getModule(libVES,'Delegate').then(function(dlg) {
 	    return dlg.login(self,null,optns);
+	});
+    },
+    flow: function(start, optns) {
+	var self = this;
+	return libVES.getModule(libVES, 'Delegate').then(function(dlg) {
+	    return dlg.flow(self, start, optns);
+	});
+    },
+    authorize: function(msg) {
+	var self = this;
+	if (msg.token) this.token = msg.token;
+	if (msg.externalId) this.externalId = msg.externalId;
+	return (msg.VESkey ? this.unlock(msg.VESkey) : this.me()).then(function() {
+	    return self;
 	});
     },
     me: function() {
@@ -148,6 +173,10 @@ libVES.prototype = {
 		    });
 		});
 		return cryptoKey;
+	    });
+	}).then(function(ck) {
+	    return self.handleAttn().catch(function() {}).then(function() {
+		return ck;
 	    });
 	});
     },
@@ -372,12 +401,14 @@ libVES.prototype = {
 			    });
 			});
 			else r = k;
-			me.currentVaultKey = me.activeVaultKeys = undefined;
+			me.currentVaultKey = me.activeVaultKeys = me.shadowVaultKey = undefined;
 			if (!cur || !lost) me.vaultKeys = undefined;
 			return r;
 		    });
 		}).then(function(r) {
-		    return r.post(undefined,undefined,options);
+		    return self.elevateAuth(options).then(function(optns) {
+			return r.post(undefined, undefined, optns);
+		    });
 		}).catch(function(e) {
 		    self.reset();
 		    throw e;
@@ -404,21 +435,21 @@ libVES.prototype = {
 	    return rs;
 	});
     },
-    getSecondaryKey: function(ext,force) {
+    getSecondaryKey: function(ext, force) {
 	var self = this;
 	return this.prepareExternals(Promise.resolve(ext).then(function(e) {
-	    if (e.domain && !e.externalId) return libVES.getModule(libVES.Domain,e.domain).then(function(mod) {
+	    if (e.domain && !e.externalId) return libVES.getModule(libVES.Domain, e.domain).then(function(mod) {
 		return self.me().then(function(me) {
-		    return mod.userToVaultRef(me,self);
+		    return mod.userToVaultRef(me, self);
 		});
 	    });
 	    return e;
 	})).then(function(ext) {
-	    var vkey = new libVES.VaultKey({externals: ext},self);
+	    var vkey = new libVES.VaultKey({externals: ext}, self);
 	    return vkey.getId().then(function(id) {
 		return vkey;
 	    }).catch(function(e) {
-		if (!force) throw e;
+		if (!force || e.code != 'NotFound') throw e;
 		return self.setSecondaryKey(ext);
 	    });
 	});
@@ -429,14 +460,24 @@ libVES.prototype = {
 	    if (!veskey) veskey = self.generateVESkey();
 	    return self.me().then(function(me) {
 		return (new libVES.VaultKey({type: 'secondary', algo: self.keyAlgo, user: me, externals: ext},self)).generate(veskey,optns).then(function(k) {
+		    return self.getSecondaryKey(ext).then(function(k2) {
+			return k.rekeyFrom(k2);
+		    }).catch(function(e) {
+			delete(k.vaultEntries);
+			return k;
+		    });
+		}).then(function(k) {
 		    var vi = new libVES.VaultItem({type: "password"},self);
 		    k.setField('vaultItems',[vi]);
 		    return Promise.resolve(veskey).then(function(v) {
 			if (!v) throw new libVES.Error('InvalidValue','VESkey cannot be empty');
 			return vi.shareWith([me],v,false).then(function() {
-			    return k.post().then(function(post) {
-				self.reset(post);
-				return k;
+			    return self.elevateAuth(optns);
+			}).then(function(optns) {
+			    return k.post(undefined, undefined, optns).then(function(post) {
+				return k.setField('id', post.id, false).then(function() {
+				    return k;
+				});
 			    });
 			});
 		    });
@@ -445,8 +486,20 @@ libVES.prototype = {
 	});
     },
     setShadow: function(usrs,optns) {
-	if (!optns || !optns.n) return Promise.reject(new libVES.Error('InvalidValue','optns.n must be an integer'));
 	var self = this;
+	if (!(usrs instanceof Array)) return Promise.reject(new libVES.Error('InvalidValue', 'usrs must be an array'));
+	if (!usrs.length) {
+	    return self.getShadowKey().then(function(sh) {
+		return (sh ? sh.getId().then(function(id) {
+		    return self.elevateAuth(optns).then(function(optns) {
+			return self.post('vaultKeys/' + id, {'$op': 'delete'}, undefined, optns). then(function() {
+			    return null;
+			});
+		    });
+		}) : null);
+	    });
+	}
+	if (!optns || !optns.n) return Promise.reject(new libVES.Error('InvalidValue','optns.n must be an integer'));
 	var rkey = new Uint8Array(32);
 	window.crypto.getRandomValues(rkey);
 	var algo = optns.v ? libVES.Scramble.algo[optns.v] : libVES.Scramble.RDX;
@@ -468,7 +521,9 @@ libVES.prototype = {
 				delete(libVES.Object._refs);
 				return vis;
 			    }));
-			    return k.post();
+			    return self.elevateAuth(optns).then(function(optns) {
+				return k.post(undefined, undefined, optns);
+			    });
 			});
 		    });
 		}).catch(function(e) {
@@ -583,8 +638,8 @@ libVES.prototype = {
     hashText: function(text,cls) {
 	if (cls) cls = cls.split('.')[0];
 	else cls = this.defaultHash;
-	return libVES.getModule(libVES.Util,['Hash',cls]).then(function(fn) {
-	    return fn(libVES.Util.StringToByteArray(text)).then(function(buf) {
+	return libVES.getModule(libVES.Util,['Hash',cls]).then(function(mod) {
+	    return mod.hash(libVES.Util.StringToByteArray(text)).then(function(buf) {
 		return cls + '.' + libVES.Util.ByteArrayToB64W(buf);
 	    });
 	});
@@ -623,8 +678,6 @@ libVES.prototype = {
 		    }).then(function() {
 			chain = chain.then(function(ct) {
 			    return vaultKey.rekey().then(function() {
-				if (self.onRekey) return self.onRekey(vaultKey);
-			    }).then(function() {
 				return ct + 1;
 			    });
 			}).catch(function(e) {console.log(e);});;
@@ -670,6 +723,52 @@ libVES.prototype = {
 		});
 	    });
 	});
+    },
+    getAttn: function() {
+	var self = this;
+	var rs = {};
+	return self.get('attn').then(function(attn) {
+	    return attn ? Promise.all([(attn.vaultKeys ? Promise.all(attn.vaultKeys.map(function(vk, i) {
+		return new libVES.VaultKey(vk, self);
+	    })).then(function(vks) {
+		rs.vaultKeys = vks;
+	    }) : null)]) : null;
+	}).then(function() {
+	    return rs;
+	});
+    },
+    handleAttn: function(attn) {
+	var self = this;
+	return (attn ? Promise.resolve(attn) : self.getAttn()).then(function(attn) {
+	    if (attn) return Promise.all([(attn.vaultKeys ? self.attnVaultKeys(attn.vaultKeys) : null)]);
+	});
+    },
+    attnVaultKeys: function(vkeys) {
+	var self = this;
+	return Promise.all(vkeys.map(function(vkey, i) {
+	    console.log('attnVaultKeys:', vkey);
+	    return vkey.getType().then(function(type) {
+		switch (type) {
+		    case 'temp':
+			return vkey.getUser().then(function(user) {
+			    return self.me().then(function(me) {
+				return Promise.all([user.getId(), me.getId()]).then(function(ids) {
+				    if (ids[0] == ids[1]) return vkey.rekey();
+				    else return vkey.getVaultItems().then(function(vis) {
+					return Promise.all(vis.map(function(vi, i) {
+					    return vi.reshareWith([user]);
+					}));
+				    });
+				});
+			    });
+			});
+		    case 'recovery':
+			return vkey.getRecovery().then(function(rcv) {
+			    return rcv.recover();
+			});
+		}
+	    });
+	}));
     }
 };
 

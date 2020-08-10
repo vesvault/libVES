@@ -46,19 +46,20 @@ libVES.Cipher.prototype = {
 	}
     },
     getSecret: function() {
+	var self = this;
 	var meta = null;
 	if (this.meta) for (var k in this.meta) {
 	    meta = libVES.Util.StringToByteArray(JSON.stringify(this.meta));
 	    break;
 	}
 	var buf = new Uint8Array(this.keySize + this.ivSize + (meta ? meta.byteLength : 0));
-	return Promise.all([this.key,this.IV]).then(function(data) {
-	    return crypto.subtle.exportKey("raw",data[0]).then(function(key) {
-		buf.set(new Uint8Array(key),0);
-		buf.set(new Uint8Array(data[1]),key.byteLength);
-		if (meta) buf.set(meta,key.byteLength + data[1].byteLength);
-		return buf;
-	    });
+	return Promise.all([(this.algo ? this.key.then(function(key) {
+	    return crypto.subtle.exportKey("raw", key);
+	}) : this.key), this.IV]).then(function(data) {
+	    buf.set(new Uint8Array(data[0]), 0);
+	    buf.set(new Uint8Array(data[1]), data[0].byteLength);
+	    if (meta) buf.set(new Uint8Array(meta), data[0].byteLength + data[1].byteLength);
+	    return buf;
 	});
     },
     buildKey: function(key) {
@@ -98,6 +99,10 @@ libVES.Cipher.prototype = {
     }
 };
 
+libVES.Cipher.NULL = function(rec) {
+    this.init(rec);
+}
+
 libVES.Cipher.AES = function(data) {
     for (var k in data) this[k] = data[k];
 };
@@ -113,6 +118,11 @@ libVES.Cipher.AES256GCM = function(rec) {
 libVES.Cipher.AES256GCMp = function(rec) {
     this.init(rec);
 };
+
+libVES.Cipher.NULL.prototype = new libVES.Cipher({
+    keySize: 0,
+    ivSize: 0
+});
 
 libVES.Cipher.AES.prototype = new libVES.Cipher({
     keySize: 32,

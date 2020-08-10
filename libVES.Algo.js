@@ -105,7 +105,7 @@ libVES.Algo = {
 	    throw new libVES.Error('Internal',"Unknown type of key object");
 	},
 	generate: function(optns) {
-	    var op = {name:'ECDH', namedCurve:'P-521'};
+	    var op = {name:'ECDH', namedCurve:'P-384'};
 	    if (optns) for (var k in optns) op[k] = optns[k];
 	    return crypto.subtle.generateKey(op,true,['deriveKey','deriveBits']);
 	},

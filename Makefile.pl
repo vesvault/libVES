@@ -68,7 +68,7 @@ $Head = <<HEAD;
  *         \\___/              - VESrecovery (TM)
  *
  *
- * (c) 2017 - 2018 VESvault Corp
+ * (c) 2017 - 2020 VESvault Corp
  * Jim Zubov <jz\@vesvault.com>
  *
  * GNU General Public License v3

@@ -336,9 +336,21 @@ libVES.Util = {
 	}
     },
     PBKDF2: {
-	deriveKey: function(args,pwd,algo) {
-	    return crypto.subtle.importKey('raw',libVES.Util.StringToByteArray(pwd),'PBKDF2',false,['deriveKey']).then(function(k) {
-		return crypto.subtle.deriveKey({name:'PBKDF2', salt:args[0], iterations:args[1], hash: 'SHA-1'},k,algo,true,['encrypt','decrypt']);
+	deriveKey: function(args, pwd, algo) {
+	    return crypto.subtle.importKey('raw', libVES.Util.StringToByteArray(pwd), 'PBKDF2', false, ['deriveKey']).then(function(k) {
+		var keyargs = {name:'PBKDF2', salt:args[0], iterations:args[1]};
+		var ka;
+		if (args[2] && (args[2][0] instanceof libVES.Util.OID)) ka = args[2][0].object().then(function(obj) {
+		    obj.setArgs(keyargs, args[2][1]);
+		    return keyargs;
+		});
+		else {
+		    keyargs.hash = 'SHA-1';
+		    ka = Promise.resolve(keyargs);
+		}
+		return ka.then(function(keyargs) {
+		    return crypto.subtle.deriveKey(keyargs, k, algo, true, ['encrypt', 'decrypt']);
+		});
 	    });
 	},
 	import: function(args,chain,optns) {
@@ -381,8 +393,41 @@ libVES.Util = {
 	}
     },
     Hash: {
-	SHA256: function(buf) {
-	    return crypto.subtle.digest('SHA-256',buf);
+	SHA1: {
+	    setArgs: function(args, optns) {
+		args.hash = 'SHA-1';
+		return args;
+	    },
+	    hash: function(buf) {
+		return crypto.subtle.digest('SHA-1',buf);
+	    }
+	},
+	SHA256: {
+	    setArgs: function(args, optns) {
+		args.hash = 'SHA-256';
+		return args;
+	    },
+	    hash: function(buf) {
+		return crypto.subtle.digest('SHA-256',buf);
+	    }
+	},
+	SHA384: {
+	    setArgs: function(args, optns) {
+		args.hash = 'SHA-384';
+		return args;
+	    },
+	    hash: function(buf) {
+		return crypto.subtle.digest('SHA-384',buf);
+	    }
+	},
+	SHA512: {
+	    setArgs: function(args, optns) {
+		args.hash = 'SHA-512';
+		return args;
+	    },
+	    hash: function(buf) {
+		return crypto.subtle.digest('SHA-512',buf);
+	    }
 	}
     }
 };
@@ -413,8 +458,12 @@ libVES.Util.OID.prototype = {
     }
 }
 
-libVES.Util.OID['1.2.840.113549.1.5.13'] = libVES.getModuleFunc(libVES,['Util','PKCS5']);
-libVES.Util.OID['1.2.840.113549.1.5.12'] = libVES.getModuleFunc(libVES,['Util','PBKDF2']);
-libVES.Util.OID['2.16.840.1.101.3.4.1.42'] = libVES.getModuleFunc(libVES,['Cipher','AES256CBC']);
-libVES.Util.OID['1.2.840.113549.1.1.1'] = libVES.getModuleFunc(libVES,['Util','PKCS1']);
-libVES.Util.OID['1.2.840.10045.2.1'] = libVES.getModuleFunc(libVES,['Util','EC']);
+libVES.Util.OID['1.2.840.113549.1.5.13'] = libVES.getModuleFunc(libVES, ['Util', 'PKCS5']);
+libVES.Util.OID['1.2.840.113549.1.5.12'] = libVES.getModuleFunc(libVES, ['Util', 'PBKDF2']);
+libVES.Util.OID['2.16.840.1.101.3.4.1.42'] = libVES.getModuleFunc(libVES, ['Cipher', 'AES256CBC']);
+libVES.Util.OID['1.2.840.113549.1.1.1'] = libVES.getModuleFunc(libVES, ['Util', 'PKCS1']);
+libVES.Util.OID['1.2.840.10045.2.1'] = libVES.getModuleFunc(libVES, ['Util', 'EC']);
+libVES.Util.OID['1.2.840.113549.2.7'] = libVES.getModuleFunc(libVES, ['Util', 'Hash', 'SHA1']);
+libVES.Util.OID['1.2.840.113549.2.9'] = libVES.getModuleFunc(libVES, ['Util', 'Hash', 'SHA256']);
+libVES.Util.OID['1.2.840.113549.2.10'] = libVES.getModuleFunc(libVES, ['Util', 'Hash', 'SHA384']);
+libVES.Util.OID['1.2.840.113549.2.11'] = libVES.getModuleFunc(libVES, ['Util', 'Hash', 'SHA512']);

@@ -347,6 +347,7 @@ libVES.VaultKey.prototype = new libVES.Object({
 	    switch (t) {
 	    case 'secondary':
 	    case 'temp':
+	    case 'lost':
 		return self.getVaultItems().then(function(vis) {
 		    var f = function(vis) {
 			if (!vis.length) throw new libVES.Error('InvalidKey','Cannot unlock the secondary key');
@@ -513,9 +514,11 @@ libVES.VaultKey.prototype = new libVES.Object({
 		}));
 	    }).then(function(keys) {
 		return user.setField('vaultKeys',keys).then(function() {
-		    return user.post(null,{vaultEntries: true},{refs: {'#/': user}}).then(function(data) {
+		    return user.post(null,{vaultEntries: true}, {refs: {'#/': user}}).then(function(data) {
 			self.setFields(data,false);
-			return self;
+			return self.VES.onRekey ? self.VES.onRekey(self).catch(function() {}).then(function() {
+			    return self;
+			}) : self;
 		    });
 		});
 	    });
@@ -534,6 +537,7 @@ libVES.VaultKey.prototype = new libVES.Object({
     getSessionToken: function() {
 	var self = this;
 	return this.getField('encSessionToken').then(function(tk) {
+	    if (!tk) return null;
 	    return self.decrypt(tk).then(function(b) {
 		return libVES.Util.ByteArrayToString(b);
 	    });
@@ -632,45 +636,49 @@ libVES.VaultItem.prototype = new libVES.Object({
 	    });
 	});
     },
+    resolveRaw: function(val) {
+	return (val == null ? this.getRaw() : this.build(val));
+    },
     shareWith: function(usrs,val,save) {
 	var self = this;
-	return (val == null ? self.getRaw() : self.build(val)).then(function(v) {
-	    return self.VES.usersToKeys(usrs).then(function(ks) {
-		return (val == null ? self.getVaultEntries().then(function(ves) {
-		    var k_ves = {};
-		    var k_used = {};
-		    for (var j = 0; j < ves.length; j++) k_ves[ves[j].vaultKey.id] = ves[j];
-		    return Promise.all(ks.map(function(k,j) {
-			return k.getId().then(function(k_id) {
-			    k_used[k_id] = true;
-			    return k_ves[k_id];
-			}).catch(function(){});
-		    })).then(function(old_ves) {
-			for (var k_id in k_ves) if (!k_used[k_id]) old_ves.push(k_ves[k_id]);
-			return old_ves;
-		    });
-		}) : Promise.resolve([])).then(function(old_ves) {
-		    var new_ves = [];
-		    var set_ves = [];
-		    return Promise.all(ks.map(function(k,j) {
-			return new_ves[j] = (old_ves[j] || k.encrypt(v).then(function(ctext) {
+	return self.VES.usersToKeys(usrs).then(function(ks) {
+	    return (val == null ? self.getVaultEntries().then(function(ves) {
+		var k_ves = {};
+		var k_used = {};
+		for (var j = 0; j < ves.length; j++) k_ves[ves[j].vaultKey.id] = ves[j];
+		return Promise.all(ks.map(function(k,j) {
+		    return k.getId().then(function(k_id) {
+			k_used[k_id] = true;
+			return k_ves[k_id];
+		    }).catch(function(){});
+		})).then(function(old_ves) {
+		    for (var k_id in k_ves) if (!k_used[k_id]) old_ves.push(k_ves[k_id]);
+		    return old_ves;
+		});
+	    }) : Promise.resolve([])).then(function(old_ves) {
+		var new_ves = [];
+		var set_ves = [];
+		var valr = null;
+		return Promise.all(ks.map(function(k,j) {
+		    return new_ves[j] = (old_ves[j] || (valr != null ? valr : valr = self.resolveRaw(val)).then(function(v) {
+			return k.encrypt(v).then(function(ctext) {
 			    return (function(refs) {
 				if (refs) for (var i in refs) if (refs[i] === k) return Promise.resolve({'$ref':i});
 				return k.postData(null,refs);
 			    })(libVES.Object._refs).then(function(pd) {
 				return set_ves.push({vaultKey: pd, encData: ctext});
 			    });
-			}));
-		    })).then(function() {
-			return Promise.all(old_ves.slice(ks.length).map(function(ve,j) {
-			    return (new libVES.VaultKey(ve.vaultKey,self.VES)).matchVaults(ks).then(function(f) {
-				if (f === false) set_ves.push({vaultKey: ve.vaultKey, '$op': 'delete'});
-			    });
-			}));
-		    }).then(function() {
-			if (!set_ves.length) return save = false;
-			return self.setField('vaultEntries',set_ves);
-		    });
+			});
+		    }));
+		})).then(function() {
+		    return Promise.all(old_ves.slice(ks.length).map(function(ve,j) {
+			return (new libVES.VaultKey(ve.vaultKey,self.VES)).matchVaults(ks).then(function(f) {
+			    if (f === false) set_ves.push({vaultKey: ve.vaultKey, '$op': 'delete'});
+			});
+		    }));
+		}).then(function() {
+		    if (!set_ves.length) return save = false;
+		    return self.setField('vaultEntries',set_ves);
 		});
 	    });
 	}).then(function() {

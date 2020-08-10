@@ -32,11 +32,14 @@ libVES.Delegate = {
     html: '<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:table;z-index:200000;">'
 	+ '<div style="display:table-row;"><div style="display:table-cell;vertical-align:middle;text-align:center;">'
 	+ '<div style="min-width:320px;max-width:640px;;background-color:white;margin: auto;padding: 30px;">'
-	+ '<p>Use the VESvault popup window to grant access to the App Vault</p>'
-	+ '<p class="VESvaultDelegateBlockerMsg" style="color: #bf7f00; font-style:italic;">&nbsp;</p>'
-	+ '<p><a class="VESvaultDelegateRetryLnk" href="{$url}" target="VESvaultDelegate" onclick="return !libVES.Delegate.retryPopup(this.href,this)">Click here</a> if you can\'t see VESvault popup window</p>'
-	+ '<p><a class="VESvaultDelegateCancelLnk" href="#" onclick="libVES.Delegate.cancel(); return false;">Cancel</a></p>'
+	+ '{$content}'
 	+ '</div></div></div></div>',
+    htmlDlg: '<p>Use the VESvault popup window to grant access to the App Vault</p>'
+	   + '<p class="VESvaultDelegateBlockerMsg" style="color: #bf7f00; font-style:italic;">&nbsp;</p>'
+	   + '<p><a class="VESvaultDelegateRetryLnk" href="{$url}" target="VESvaultDelegate" onclick="return !libVES.Delegate.retryPopup(this.href,this)">Click here</a> if you can\'t see VESvault popup window</p>'
+	   + '<p><a class="VESvaultDelegateCancelLnk" href="#" onclick="libVES.Delegate.cancel(); return false;">Cancel</a></p>',
+    htmlFlw: '<p>Authorizing VES Access</p>'
+	   + '<iframe style="width: 100%; height: 48px; border: none;" src="{$url}"></iframe>',
     htmlBlockerMsg: 'Looks like your browser is using a popup blocker...',
     name: 'VESvaultDelegate',
     login: function(VES,challenge,optns) {
@@ -50,11 +53,9 @@ libVES.Delegate = {
 	return this.response = new Promise(function(resolve,reject) {
 	    self.reject = reject;
 	    self.resolve = resolve;
-	    var url = VES.wwwUrl + 'session/delegate/' + escape(VES.app) + '/' + escape(VES.domain);
-	    self.matchOrigin = (function(m) { return m ? m[0] : document.location.protocol + '//' + document.location.host; })(url.match(/^(https\:\/\/[^\/\?\#]+)/));
-	    self.popup = document.createElement('DIV');
-	    self.popup.innerHTML = self.html.replace('{$url}',url);
-	    document.getElementsByTagName('BODY')[0].appendChild(self.popup);
+	    var url = VES.wwwUrl + (VES.app ? 'session/delegate/' + encodeURIComponent(VES.app) + '/' : 'vv/unlock?via=delegate&url=' + encodeURIComponent(document.location.href) + '&domain=') + encodeURIComponent(VES.domain);
+	    self.setOrigin(url);
+	    self.showOverlay(self.htmlDlg.replace('{$url}',url));
 	    self.retryPopupCalled = 0;
 	    try {
 		document.getElementsByClassName('VESvaultDelegateRetryLnk')[0].onclick = function() {
@@ -77,6 +78,35 @@ libVES.Delegate = {
 	    self.popupInterval = window.setInterval(self.chkCancel.bind(self),1000);
 	});
     },
+    flow: function(VES, start, optns) {
+	if (this.response) return this.response;
+	this.VES = VES;
+	var self = this;
+	var unlk = VES.wwwUrl + 'vv/unlock';
+	if (start || (!sessionStorage['libVES.flowStarted'] && document.referrer.substr(0, unlk.length).toLowerCase() == unlk.toLowerCase())) {
+	    return self.response = new Promise(function(resolve, reject) {
+		self.reject = reject;
+		self.resolve = resolve;
+		var ifrm = VES.wwwUrl + 'vv/flowin?url=' + encodeURIComponent(document.location.href) + '&domain=' + encodeURIComponent(VES.domain);
+		if (optns && optns.item) ifrm += '&item=' + encodeURIComponent(optns.item);
+		self.setOrigin(ifrm);
+		window.addEventListener('message',self.listener.bind(self));
+		self.showOverlay(self.htmlFlw.replace('{$url}', ifrm));
+		if (start) delete(sessionStorage['libVES.flowStarted'])
+		else sessionStorage['libVES.flowStarted'] = true;
+	    });
+	} else {
+	    return new Promise(function(){});
+	}
+    },
+    showOverlay: function(cont) {
+	this.popup = document.createElement('DIV');
+	this.popup.innerHTML = this.html.replace('{$content}', cont);
+	document.getElementsByTagName('BODY')[0].appendChild(this.popup);
+    },
+    setOrigin: function(url) {
+	this.matchOrigin = (function(m) { return m ? m[0] : document.location.protocol + '//' + document.location.host; })(url.match(/^(https\:\/\/[^\/\?\#]+)/));
+    },
     openPopup: function(url) {
 	return this.popupWindow = window.open(url,this.name,"width=600,height=600,top=100,left=100");
     },
@@ -90,30 +120,13 @@ libVES.Delegate = {
 	return !f && this.openPopup(url);
     },
     listener: function(evnt) {
-	if (this.popupWindow && evnt.origin == this.matchOrigin) try {
+	if (this.popup && evnt.origin == this.matchOrigin) try {
 	    var msg = JSON.parse(evnt.data);
-	    var VES = this.VES;
-	    if (msg.externalId) {
-		VES.externalId = msg.externalId;
-		this.resolve(VES.unlock(msg.VESkey).then(function() {
-		    return VES;
-		}));
-	    } else if (msg.token) {
-		VES.token = msg.token;
-		this.resolve(VES.getSecondaryKey({domain:VES.domain},true).then(function(vaultKey) {
-		    return vaultKey.getExternals().then(function(externals) {
-			return Promise.all(externals.map(function(ext,i) {
-			    return ext.getDomain();
-			})).then(function(domains) {
-			    for (var i = 0; i < domains.length; i++) if (domains[i] == VES.domain) return externals[i].getExternalId();
-			    throw new libVES.Error('Internal','No external id found for newly created secondary key');
-			}).then(function(extId) {
-			    VES.externalId = extId;
-			    return VES;
-			});
-		    });
-		}));
-	    } else return;
+	    if (msg.redirect) {
+		document.location.href = msg.redirect;
+	    } else {
+		this.resolve(this.VES.authorize(msg));
+	    }
 	    this.close();
 	    if (!evnt.source.closed) evnt.source.close();
 	} catch(e) {}
@@ -130,7 +143,7 @@ libVES.Delegate = {
 	    this.popupInterval = null;
 	    this.popup.parentNode.removeChild(this.popup);
 	    this.popup = null;
-	    return self.response;
+	    return this.response;
 	}
     },
     cancel: function() {
