@@ -285,7 +285,6 @@ libVES.Util = {
 	    })(args[i],f);
 	    return f('import',optns).then(function(der) {
 		return libVES.Util.ASN1.import(new Uint8Array(der));
-//		return crypto.subtle.importKey('pkcs8',der,{name:'RSA-OAEP', hash:'SHA-1'},true,['decrypt']);
 	    }).catch(function(e) {
 		throw new libVES.Error('InvalidKey',"Cannot import the private key (Invalid VESkey?)");
 	    });
@@ -317,7 +316,12 @@ libVES.Util = {
 	    ];
 	    return Promise.all(ops.members).then(function(ms) {
 		ops.members = ms;
-		return crypto.subtle.exportKey('pkcs8',key).then(function(der) {
+		return crypto.subtle.exportKey('pkcs8',key).catch(function(e) {
+		    console.log('PKCS8 failed, trying JWK...');
+		    return crypto.subtle.exportKey('jwk', key).then(function(jwk) {
+			return libVES.Util.PKCS8.fromJWK(jwk);
+		    });
+		}).then(function(der) {
 		    ops.content = der;
 		    var rec = [];
 		    if (ops.password) return libVES.Util.PKCS5.export(function(call,optns) {
@@ -327,12 +331,58 @@ libVES.Util = {
 			rec[0] = data;
 			return libVES.Util.PEM.encode(libVES.Util.ASN1.encode([rec]),'ENCRYPTED PRIVATE KEY');
 		    });
-		    else if (ops.opentext) return crypto.subtle.exportKey('pkcs8',data).then(function(der) {
-			return libVES.Util.PEM.encode(der,'PRIVATE KEY');
-		    });
-		    else throw libVES.Error('Internal','No password for key export (opentext=true to export without password?)');
+		    else if (ops.opentext) return libVES.Util.PEM.encode(der,'PRIVATE KEY');
+		    else throw new libVES.Error('Internal','No password for key export (opentext=true to export without password?)');
 		});
 	    });
+	},
+	fromJWK: function(jwk) {
+	    if (jwk.kty != 'EC') throw new libVES.Error('Internal', 'kty=="EC" expected (workaround for Firefox)');
+	    var pubx = libVES.Util.B64ToByteArray(jwk.x);
+	    var puby = libVES.Util.B64ToByteArray(jwk.y);
+	    var pub = new Uint8Array(pubx.byteLength + puby.byteLength + 2);
+	    pub[0] = 0;
+	    pub[1] = 4;
+	    pub.set(new Uint8Array(pubx), 2);
+	    pub.set(new Uint8Array(puby), pubx.byteLength + 2);
+	    pub.ASN1type = 3;
+	    pub = libVES.Util.ASN1.encode([pub]);
+	    pub.ASN1type = 0xa1;
+	    return libVES.Util.ASN1.encode([[
+		0,
+		[
+		    new libVES.Util.OID('1.2.840.10045.2.1'),
+		    new libVES.Util.OID((function(crvs) {
+			for (var k in crvs) if (crvs[k] == jwk.crv) return k;
+			throw new libVES.Error('Internal', 'Unknown named curve: ' + jwk.crv);
+		    })(libVES.Util.EC.namedCurves))
+		],
+		libVES.Util.ASN1.encode([[
+		    1,
+		    libVES.Util.B64ToByteArray(jwk.d),
+		    pub
+		]])
+	    ]]).buffer;
+	},
+	toJWK: function(key) {
+	    var der = libVES.Util.ASN1.decode(key)[0];
+	    if (der[1][0] != '1.2.840.10045.2.1') throw new libVES.Error('Internal', 'EC PKCS8 expected');
+	    var der2 = libVES.Util.ASN1.decode(der[2])[0];
+	    var pub;
+	    var publ = 0;
+	    if (der2[2]) {
+		pub = libVES.Util.ASN1.decode(der2[2])[0];
+		if (pub.byteLength > 2 && pub[1] == 4) publ = pub.byteLength / 2 - 1;
+	    }
+	    return {
+		crv: libVES.Util.EC.namedCurves[der[1][1]],
+		d: libVES.Util.ByteArrayToB64W(der2[1]),
+		ext: true,
+		key_ops: ['deriveKey', 'deriveBits'],
+		kty: 'EC',
+		x: (publ ? libVES.Util.ByteArrayToB64W(pub.slice(2, publ + 2)) : ''),
+		y: (publ ? libVES.Util.ByteArrayToB64W(pub.slice(publ + 2, 2 * publ + 2)) : '')
+	    };
 	}
     },
     PBKDF2: {
@@ -382,7 +432,10 @@ libVES.Util = {
 	    return chain('container',optns).then(function(der) {
 		var a = {name:'ECDH',namedCurve:libVES.Util.EC.namedCurves[String(args)]};
 		return crypto.subtle.importKey('spki',der,a,true,[]).catch(function() {;
-		    return crypto.subtle.importKey('pkcs8',der,a,true,['deriveKey','deriveBits']);
+		    return crypto.subtle.importKey('pkcs8',der,a,true,['deriveKey','deriveBits']).catch(function(e) {
+		        console.log('PKCS8 failed, trying JWK...');
+			return crypto.subtle.importKey('jwk', libVES.Util.PKCS8.toJWK(der), a, true, ['deriveKey', 'deriveBits']);
+		    });
 		});
 	    });
 	},

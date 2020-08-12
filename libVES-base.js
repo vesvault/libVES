@@ -153,6 +153,27 @@ libVES.prototype = {
 	    return self;
 	});
     },
+    carry: function(optns) {
+	var cr = {};
+	if (self.externalId) cr.externalId = self.externalId;
+	if (self.token) cr.token = self.token;
+	try {
+	    sessionStorage['libVES_carry'] = JSON.stringify(cr);
+	} catch (e) {
+	    return Promise.reject(e);
+	}
+	return Promise.resolve(true);
+    },
+    pick: function(optns) {
+	try {
+	    var cr = JSON.parse(sessionStorage['libVES_carry']);
+	    for (var k in cr) self[k] = cr[k];
+	    delete(sessionStorage['libVES_carry']);
+	    return Promise.resolve(self);
+	} catch (e) {
+	    return Promise.reject(e);
+	}
+    },
     me: function() {
 	var self = this;
 	if (!this.userMe) this.userMe = this.get('me').then((function(data) {

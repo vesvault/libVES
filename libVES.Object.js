@@ -761,8 +761,9 @@ libVES.VaultItem.Type = {
 		return new ci(new Uint8Array(buf));
 	    });
 	},
-	build: function(data) {
+ 	build: function(data) {
 	    if (!(data instanceof libVES.Cipher)) throw new libVES.Error('InvalidData',"Content of a VaultItem type 'file' must be libVES.Cipher");
+	    this.setField('meta', data.getMeta());
 	    return data.getSecret();
 	}
     },

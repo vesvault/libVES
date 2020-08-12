@@ -62,6 +62,9 @@ libVES.Cipher.prototype = {
 	    return buf;
 	});
     },
+    getMeta: function() {
+	return {a: this.a};
+    },
     buildKey: function(key) {
 	if (!this.algo) return Promise.resolve(key);
 	return crypto.subtle.importKey('raw',key,this.algo,true,['encrypt','decrypt']);
@@ -120,6 +123,7 @@ libVES.Cipher.AES256GCMp = function(rec) {
 };
 
 libVES.Cipher.NULL.prototype = new libVES.Cipher({
+    a: 'NULL',
     keySize: 0,
     ivSize: 0
 });
