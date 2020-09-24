@@ -155,8 +155,9 @@ libVES.prototype = {
     },
     carry: function(optns) {
 	var cr = {};
-	if (self.externalId) cr.externalId = self.externalId;
-	if (self.token) cr.token = self.token;
+	if (this.externalId) cr.externalId = this.externalId;
+	if (this.token) cr.token = this.token;
+	if (this.VESkey) cr.VESkey = this.VESkey;
 	try {
 	    sessionStorage['libVES_carry'] = JSON.stringify(cr);
 	} catch (e) {
@@ -167,9 +168,8 @@ libVES.prototype = {
     pick: function(optns) {
 	try {
 	    var cr = JSON.parse(sessionStorage['libVES_carry']);
-	    for (var k in cr) self[k] = cr[k];
 	    delete(sessionStorage['libVES_carry']);
-	    return Promise.resolve(self);
+	    return this.authorize(cr);
 	} catch (e) {
 	    return Promise.reject(e);
 	}
@@ -185,13 +185,10 @@ libVES.prototype = {
 	var self = this;
 	return this.getVaultKey().then(function(vkey) {
 	    return vkey.unlock(Promise.resolve(veskey)).then(function(cryptoKey) {
+		if (self.VESkey === null) self.VESkey = veskey;
 		if (!self.token && self.type == 'secondary') return vkey.getSessionToken().then(function(tkn) {
 		    self.token = tkn;
-		    return Promise.resolve(veskey).then(function(veskey) {
-			if (veskey) return vkey.reshareVESkey(veskey).catch(function(){});
-		    }).then(function() {
-			return cryptoKey;
-		    });
+		    return cryptoKey;
 		});
 		return cryptoKey;
 	    });
@@ -280,7 +277,7 @@ libVES.prototype = {
 		if (u instanceof libVES.VaultKey) return [u];
 		else if (u instanceof libVES.External) return [new libVES.VaultKey({externals:[u]},self)];
 		else if (u instanceof libVES.User) return self.getUserKeys(u);
-		else if (u instanceof Array || u.domain != null || u.externalId != null) return self._matchSecondaryKey(u,u.user).then(function(vkey) {
+		else if (u instanceof Array || u.domain != null || u.externalId != null) return self._matchSecondaryKey(u, u.user, u.appUrl).then(function(vkey) {
 		    return [vkey];
 		});
 	    }
@@ -298,7 +295,7 @@ libVES.prototype = {
 	} else if (typeof(u) == 'string' && u.match(/^\S+\@\S+$/)) return new libVES.User({email: u},this);
 	throw new libVES.Error('BadUser',"Cannot match user: " + u,{value: u});
     },
-    _matchSecondaryKey: function(ext,user) {
+    _matchSecondaryKey: function(ext, user, appUrl) {
 	var self = this;
 	var m = function() {
 	    return libVES.getModule(libVES.Domain,ext.domain);
@@ -326,10 +323,11 @@ libVES.prototype = {
 			return Promise.all([me.getId(),u.getId()]).then(function(ids) {
 			    if (ids[0] == ids[1]) return self.getSecondaryKey(exts,true);
 			}).catch(function(e) {
-			    if (e != 'NotFound') throw e;
+			    if (e.code != 'NotFound') throw e;
 			}).then(function(rs) {
 			    return rs || self.createTempKey(self._matchUser(u)).then(function(vkey) {
 				return vkey.setField('externals',exts).then(function() {
+				    if (appUrl) vkey.setField('appUrl', appUrl);
 				    return vkey;
 				});
 			    });
@@ -361,21 +359,21 @@ libVES.prototype = {
 	    return keys;
 	});
     },
-    createTempKey: function(usr,optns) {
+    createTempKey: function(usr, optns) {
 	var self = this;
-	var key = new libVES.VaultKey({type: 'temp', algo: this.keyAlgo, user: usr},self);
+	var key = new libVES.VaultKey({type: 'temp', algo: this.keyAlgo, user: usr}, self);
 	var veskey = this.generateVESkey(usr);
-	return key.generate(veskey,optns).then(function(k) {
-	    if (self.e2e && self.e2e.length) usr.e2e = self.getVESkeyE2E(veskey,usr);
-	    key.setField('vaultItems',veskey.then(function(v) {
-		var vi = new libVES.VaultItem({type: 'password'},self);
-		return self.me().then(function(me) {
-		    return vi.shareWith([me],v,false).then(function() {
+	return key.generate(veskey, optns).then(function(k) {
+	    if (self.e2e && self.e2e.length) usr.e2e = self.getVESkeyE2E(veskey, usr);
+	    key.setField('vaultItems', veskey.then(function(v) {
+		var vi = new libVES.VaultItem({type: 'password'}, self);
+		return Promise.all(self.type == 'secondary' ? [self.me(), self.getVaultKey()] : [self.me()]).then(function(sh) {
+		    return vi.shareWith(sh, v, false).then(function() {
 			return [vi];
 		    });
 		});
 	    }));
-	    key.setField('creator',self.me());
+	    key.setField('creator', self.me());
 	    return key;
 	});
     },

@@ -214,10 +214,6 @@ libVES.External = function(data,VES,refs) {
     this.init(data,VES,refs);
 };
 
-libVES.Lockbox = function(data,VES,refs) {
-    this.init(data,VES,refs);
-};
-
 libVES.File = function(data,VES,refs) {
     this.init(data,VES,refs);
 };
@@ -260,17 +256,6 @@ libVES.User.prototype = new libVES.Object({
 	return this.getField('friendsVaultKeys');
     },
     getCurrentVaultKey: function() {
-/*
-	if (!this.currentVaultKey) {
-	    if (this.vaultKeys) this.currentVaultKey = this.vaultKeys.then(function(vks) {
-		for (var i = 0; i < vks.length; i++) if (vks[i].type == 'current') return vks[i];
-		for (var i = 0; i < vks.length; i++) if (vks[i].type == 'temp' && vks[i].creatorUser && vks[i].creatorUser.id == self.id) return vks[i];
-	    });
-	    else if (this.activeVaultKeys) this.currentVaultKey = this.activeVaultKeys.then(function(vks) {
-		return vks[0];
-	    });
-	}
-*/
 	return this.getField('currentVaultKey');
     },
     getShadowVaultKey: function() {
@@ -564,7 +549,7 @@ libVES.VaultItem.prototype = new libVES.Object({
     apiUri: 'vaultItems',
     fieldList: {id: true},
     fieldClass: {vaultKey: libVES.VaultKey, file: libVES.File},
-    fieldSets: [{type: true, meta: true},{vaultEntries: {id: true, encData: true, vaultKey: {id: true}}},{vaultKey: true, file: true, lockbox: true}],
+    fieldSets: [{type: true, meta: true},{vaultEntries: {id: true, encData: true, vaultKey: {id: true}}},{vaultKey: true, file: true}],
     defaultCipher: 'AES256GCM',
     getRaw: function() {
 	var self = this;
@@ -614,9 +599,6 @@ libVES.VaultItem.prototype = new libVES.Object({
     },
     getFile: function() {
 	return this.getField('file');
-    },
-    getLockbox: function() {
-	return this.getField('lockbox');
     },
     parse: function(buf) {
 	var self = this;
@@ -698,7 +680,9 @@ libVES.VaultItem.prototype = new libVES.Object({
 		    var m_curr_ks = {};
 		    for (var i = 0; i < curr_ks.length; i++) m_curr_ks[curr_ids[i]] = curr_ks[i];
 		    return Promise.all(new_ks.map(function(k,i) {
-			return k.getId();
+			return k.getId().catch(function(e) {
+			    if (e.code != 'NotFound') throw e;
+			});
 		    })).then(function(new_ids) {
 			for (var i = 0; i < new_ks.length; i++) if (!m_curr_ks[new_ids[i]]) curr_ks.push(m_curr_ks[new_ids[i]] = new_ks[i]);
 			return self.shareWith(curr_ks,val,save);
@@ -785,10 +769,13 @@ libVES.VaultItem.Type.password = libVES.VaultItem.Type.string;
 libVES.File.prototype = new libVES.Object({
     apiUri: 'files',
     fieldList: {id: true},
-    fieldClass: {externals: libVES.External},
+    fieldClass: {externals: libVES.External, creator: libVES.User},
     getExternals: function() {
 	return this.getField('externals');
-    }
+    },
+    getCreator: function() {
+	return this.getField('creator');
+    },
 });
 
 libVES.External.prototype = new libVES.Object({
