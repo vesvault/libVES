@@ -148,6 +148,7 @@ libVES.prototype = {
     authorize: function(msg) {
 	var self = this;
 	if (msg.token) this.token = msg.token;
+	if (msg.domain) this.domain = msg.domain;
 	if (msg.externalId) this.externalId = msg.externalId;
 	return (msg.VESkey ? this.unlock(msg.VESkey) : this.me()).then(function() {
 	    return self;
@@ -156,6 +157,7 @@ libVES.prototype = {
     carry: function(optns) {
 	var cr = {};
 	if (this.externalId) cr.externalId = this.externalId;
+	if (this.domain) cr.domain = this.domain;
 	if (this.token) cr.token = this.token;
 	if (this.VESkey) cr.VESkey = this.VESkey;
 	try {
@@ -167,6 +169,7 @@ libVES.prototype = {
     },
     pick: function(optns) {
 	try {
+	    if (!sessionStorage['libVES_carry']) throw new libVES.Error('NotFound','No libVES_carry in sessionStorage');
 	    var cr = JSON.parse(sessionStorage['libVES_carry']);
 	    delete(sessionStorage['libVES_carry']);
 	    return this.authorize(cr);
@@ -398,20 +401,12 @@ libVES.prototype = {
 	var self = this;
 	return this.me().then(function(me) {
 	    return (new libVES.VaultKey({type: 'current', algo: self.keyAlgo, user: me},self)).generate(Promise.resolve(veskey),options).then(function(k) {
-		return me.getVaultKeys().then(function(vkeys) {
-		    var cur = null;
-		    return Promise.all(vkeys.map(function(vkey,i) {
-			return vkey.getType().then(function(t) {
-			    switch (t) {
-				case 'current':
-				    cur = vkey;
-				case 'lost':
-				    return vkey.unlock().then(function() {
-					return k.rekeyFrom(vkey);
-				    }).catch(function(e) {});
-			    }
-			});
-		    })).then(function(d) {
+		return me.getCurrentVaultKey().then(function(cur) {
+		    return (cur ? cur.unlock().then(function() {
+			return k.rekeyFrom(cur);
+		    }).catch(function(e) {
+			if (!lost) throw e;
+		    }) : Promise.resolve(null)).then(function() {
 			var r;
 			if (cur && lost) r = cur.setField('type','lost').then(function() {
 			    k.user = undefined;
@@ -495,6 +490,7 @@ libVES.prototype = {
 			}).then(function(optns) {
 			    return k.post(undefined, undefined, optns).then(function(post) {
 				return k.setField('id', post.id, false).then(function() {
+				    k.fieldUpdate = {id: true};
 				    return k;
 				});
 			    });
@@ -713,23 +709,6 @@ libVES.prototype = {
 	var self = this;
 	return self.me().then(function(me) {
 	    return me.getVaultKeys().then(function(vaultKeys) {
-			return Promise.all(vaultKeys.map(function(e,i) {
-				return e.getType();
-			})).then(function(types) {
-				var rs = [];
-				for (var i = 0; i < types.length; i++) switch (types[i]) {
-					case 'recovery': case 'shadow':
-					rs.push(vaultKeys[i].getRecovery());
-				}
-				return Promise.all(rs);
-			});
-		});
-	});
-    },
-    getFriendsRecoveries: function() {
-	var self = this;
-	return self.me().then(function(me) {
-	    return me.getFriendsVaultKeys().then(function(vaultKeys) {
 		return Promise.all(vaultKeys.map(function(e,i) {
 		    return e.getType();
 		})).then(function(types) {
@@ -739,6 +718,42 @@ libVES.prototype = {
 			    rs.push(vaultKeys[i].getRecovery());
 		    }
 		    return Promise.all(rs);
+		});
+	    });
+	});
+    },
+    getFriendsRecoveries: function() {
+	var self = this;
+	return self.me().then(function(me) {
+	    return me.getFriendsKeyItems().then(function(vaultItems) {
+		var vaultKeys = [];
+		return Promise.all(vaultItems.map(function(e,i) {
+		    return e.getVaultKey().then(function(vk) {
+			vaultKeys[i] = vk;
+			if (vk) return vk.getType();
+		    });
+		})).then(function(types) {
+		    var rs = [];
+		    for (var i = 0; i < types.length; i++) switch (types[i]) {
+			case 'recovery': case 'shadow':
+			    rs.push(vaultKeys[i].getRecovery([vaultItems[i]]));
+		    }
+		    return Promise.all(rs);
+		});
+	    });
+	});
+    },
+    getUnlockableKeys: function() {
+	var self = this;
+	return self.getVaultKey().then(function(vk) {
+	    return vk.getField('unlockableVaultKeys').then(function(vks) {
+		var rs = {};
+		return Promise.all(vks.map(function(e, i) {
+		    return e.getId().then(function(id) {
+			rs[id] = e;
+		    });
+		})).then(function() {
+		    return rs;
 		});
 	    });
 	});
@@ -769,10 +784,14 @@ libVES.prototype = {
 	    return vkey.getType().then(function(type) {
 		switch (type) {
 		    case 'temp':
+		    case 'lost':
 			return vkey.getUser().then(function(user) {
 			    return self.me().then(function(me) {
 				return Promise.all([user.getId(), me.getId()]).then(function(ids) {
-				    if (ids[0] == ids[1]) return vkey.rekey();
+				    if (ids[0] == ids[1]) return type == 'temp' ? vkey.rekey()
+				    : self.elevateAuth({authVaultKey: vkey}).then(function(optns) {
+					return vkey.rekey(optns);
+				    });
 				    else return vkey.getVaultItems().then(function(vis) {
 					return Promise.all(vis.map(function(vi, i) {
 					    return vi.reshareWith([user]);

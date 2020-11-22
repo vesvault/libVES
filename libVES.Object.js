@@ -222,7 +222,7 @@ libVES.User.prototype = new libVES.Object({
     apiUri: 'users',
     fieldList: {id: true, email: true, type: true, firstName: true, lastName: true},
     fieldExtra: {vaultKeys: true, activeVaultKeys: true, currentVaultKey: true},
-    fieldClass: {vaultKeys: libVES.VaultKey, activeVaultKeys: libVES.VaultKey, currentVaultKey: libVES.VaultKey, shadowVaultKey: libVES.VaultKey, friendsVaultKeys: libVES.VaultKey},
+    fieldClass: {vaultKeys: libVES.VaultKey, activeVaultKeys: libVES.VaultKey, currentVaultKey: libVES.VaultKey, shadowVaultKey: libVES.VaultKey, friendsKeyItems: libVES.VaultItem},
     getEmail: function() {
 	return this.getField('email');
     },
@@ -252,8 +252,8 @@ libVES.User.prototype = new libVES.Object({
 	});
 	return this.getField('activeVaultKeys');
     },
-    getFriendsVaultKeys: function() {
-	return this.getField('friendsVaultKeys');
+    getFriendsKeyItems: function() {
+	return this.getField('friendsKeyItems');
     },
     getCurrentVaultKey: function() {
 	return this.getField('currentVaultKey');
@@ -287,9 +287,9 @@ libVES.User.prototype = new libVES.Object({
 libVES.VaultKey.prototype = new libVES.Object({
     apiUri: 'vaultKeys',
     fieldList: {id: true, algo: true, type: true, publicKey: true, privateKey: true},
-    fieldClass: {user: libVES.User, vaultItems: libVES.VaultItem, externals: libVES.External, sharedKeys: libVES.VaultKey},
+    fieldClass: {user: libVES.User, vaultItems: libVES.VaultItem, externals: libVES.External, unlockableVaultKeys: libVES.VaultKey, creator: libVES.User},
     fieldExtra: {user: true, vaultItems: true},
-    fieldSets: [{vaultEntries: {id: true, encData: true, vaultItem: {id: true}}},{type: true, algo: true, publicKey: true}],
+    fieldSets: [{vaultEntries: {id: true, encData: true, vaultItem: {id: true}}},{type: true, algo: true, publicKey: true}, {unlockableVaultKeys: {id: true, type: true}}],
     getAlgo: function() {
 	return this.getField('algo');
     },
@@ -313,17 +313,11 @@ libVES.VaultKey.prototype = new libVES.Object({
     getVaultItems: function() {
 	return this.getField('vaultItems');
     },
-    getSharedKeys: function() {
-	return this.getField('sharedKeys');
-    },
     getExternals: function() {
 	return this.getField('externals');
     },
     getUser: function() {
 	return this.getField('user');
-    },
-    getVaultItems: function() {
-	return this.getField('vaultItems');
     },
     resolveVESkey: function(veskey) {
 	if (veskey) return Promise.resolve(veskey);
@@ -456,9 +450,7 @@ libVES.VaultKey.prototype = new libVES.Object({
 	    return self.setField('vaultEntries',key.unlock(veskey).then(function() {
 		return key.getVaultEntries().then(function(ves) {
 		    return Promise.all(ves.map(function(ve) {
-			return old_vis[ve.vaultItem.id] ? Promise.resolve({
-			    vaultItem: {id: ve.vaultItem.id}
-			}) : key.decrypt(ve.encData).then(function(ptxt) {
+			return old_vis[ve.vaultItem.id] ? null : key.decrypt(ve.encData).then(function(ptxt) {
 			    return self.encrypt(ptxt).then(function(ctxt) {
 				return {
 				    vaultItem: {id: ve.vaultItem.id},
@@ -471,6 +463,8 @@ libVES.VaultKey.prototype = new libVES.Object({
 				"$op": "ignore"
 			    };
 			});
+		    }).filter(function(e, i) {
+			return !!e;
 		    }));
 		});
 	    }));
@@ -478,7 +472,7 @@ libVES.VaultKey.prototype = new libVES.Object({
 	    return self;
 	});
     },
-    rekey: function() {
+    rekey: function(optns) {
 	var self = this;
 	return self.getUser().then(function(user) {
 	    return self.getExternals().then(function(exts) {
@@ -499,7 +493,9 @@ libVES.VaultKey.prototype = new libVES.Object({
 		}));
 	    }).then(function(keys) {
 		return user.setField('vaultKeys',keys).then(function() {
-		    return user.post(null,{vaultEntries: true}, {refs: {'#/': user}}).then(function(data) {
+		    if (!optns) optns = {};
+		    optns.refs = {'#/': user};
+		    return user.post(null,{vaultEntries: true}, optns).then(function(data) {
 			self.setFields(data,false);
 			return self.VES.onRekey ? self.VES.onRekey(self).catch(function() {}).then(function() {
 			    return self;
@@ -509,12 +505,12 @@ libVES.VaultKey.prototype = new libVES.Object({
 	    });
 	});
     },
-    getRecovery: function() {
+    getRecovery: function(myItems) {
 	var self = this;
 	return self.getType().then(function(t) {
 	    switch (t) {
 		case 'shadow': case 'recovery':
-		    return new libVES.Recovery(self);
+		    return new libVES.Recovery(self, myItems);
 		default: throw new libVES.Error('InvalidValue','Recovery is not applicable for VaultKey type ' + t);
 	    }
 	});
@@ -528,13 +524,15 @@ libVES.VaultKey.prototype = new libVES.Object({
 	    });
 	});
     },
-    reshareVESkey: function(veskey) {
+    reshareVESkey: function(veskey, optns) {
 	var self = this;
 	return self.getVaultItems().then(function(vaultItems) {
 	    return self.getUser().then(function(user) {
 		return Promise.all(vaultItems.map(function(vaultItem,i) {
 		    return vaultItem.getType().then(function(t) {
-			if (t == 'password') return vaultItem.reshareWith([user],veskey);
+			if (t == 'password') return vaultItem.reshareWith([user], veskey, false).then(function(vi) {
+			    return vi.post(undefined, undefined, optns);
+			});
 		    });
 		}));
 	    });
@@ -549,29 +547,33 @@ libVES.VaultItem.prototype = new libVES.Object({
     apiUri: 'vaultItems',
     fieldList: {id: true},
     fieldClass: {vaultKey: libVES.VaultKey, file: libVES.File},
-    fieldSets: [{type: true, meta: true},{vaultEntries: {id: true, encData: true, vaultKey: {id: true}}},{vaultKey: true, file: true}],
+    fieldSets: [{type: true, meta: true},{vaultEntries: {id: true, encData: true, vaultKey: {id: true, type: true, user: {id: true}}}},{vaultKey: true, file: true}],
     defaultCipher: 'AES256GCM',
     getRaw: function() {
 	var self = this;
-	return self.VES.getVaultKeysById().then(function(vaultKeys) {
-	    var f = function(vaultEntries) {
-	        var i = 0;
-		var fn = function() {
-		    for (; i < vaultEntries.length; i++) {
-			var k,d;
-			if ((d = vaultEntries[i].encData) != null && (k = vaultKeys[vaultEntries[i].vaultKey.id])) {
-			    i++;
-			    return k.decrypt(d).catch(fn);
-			}
+	var f = function(vaultEntries, vaultKeys) {
+	    var i = 0;
+	    var fn = function() {
+		for (; i < vaultEntries.length; i++) {
+		    var k, d;
+		    if ((d = vaultEntries[i].encData) != null && vaultKeys[(k = vaultEntries[i].vaultKey).id]) {
+			i++;
+			return new libVES.VaultKey(k, self.VES).decrypt(d).catch(fn);
 		    }
-		    return Promise.reject(new libVES.Error('Invalid Key',"No unlocked key to decrypt the item",{vaultItem: self}));
-		};
-		return fn();
+		}
+		return Promise.reject(new libVES.Error('Invalid Key',"No unlocked key to decrypt the item",{vaultItem: self}));
 	    };
-	    var vaultEntries = [];
-	    if (self.vaultEntryByKey) for (var k in self.vaultEntryByKey) vaultEntries.push(self.vaultEntryByKey[k]);
-	    return f(vaultEntries).catch(function() {
-		return self.getVaultEntries().then(f);
+	    return fn();
+	};
+	var vaultEntries = [];
+	if (self.vaultEntryByKey) for (var k in self.vaultEntryByKey) vaultEntries.push(self.vaultEntryByKey[k]);
+	return f(vaultEntries, self.VES.unlockedKeys).catch(function() {
+	    return self.getVaultEntries().then(function(vaultEntries) {
+		return f(vaultEntries, self.VES.unlockedKeys).catch(function() {
+		    return self.getUnlockableKeys().then(function(vks) {
+			return f(vaultEntries, vks);
+		    });
+		});
 	    });
 	});
     },
@@ -624,7 +626,7 @@ libVES.VaultItem.prototype = new libVES.Object({
     shareWith: function(usrs,val,save) {
 	var self = this;
 	return self.VES.usersToKeys(usrs).then(function(ks) {
-	    return (val == null ? self.getVaultEntries().then(function(ves) {
+	    return (val == null || self.id ? self.getVaultEntries().then(function(ves) {
 		var k_ves = {};
 		var k_used = {};
 		for (var j = 0; j < ves.length; j++) k_ves[ves[j].vaultKey.id] = ves[j];
@@ -655,7 +657,7 @@ libVES.VaultItem.prototype = new libVES.Object({
 		})).then(function() {
 		    return Promise.all(old_ves.slice(ks.length).map(function(ve,j) {
 			return (new libVES.VaultKey(ve.vaultKey,self.VES)).matchVaults(ks).then(function(f) {
-			    if (f === false) set_ves.push({vaultKey: ve.vaultKey, '$op': 'delete'});
+			    if (f === false) set_ves.push({vaultKey: {id: ve.vaultKey.id}, '$op': 'delete'});
 			});
 		    }));
 		}).then(function() {

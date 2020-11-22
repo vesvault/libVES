@@ -123,7 +123,7 @@ libVES.Delegate = {
 	if (this.popup && evnt.origin == this.matchOrigin) try {
 	    var msg = JSON.parse(evnt.data);
 	    if (msg.redirect) {
-		document.location.href = msg.redirect;
+		document.location.replace(msg.redirect);
 	    } else {
 		this.resolve(this.VES.authorize(msg));
 	    }

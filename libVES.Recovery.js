@@ -28,8 +28,9 @@
  * libVES.Recovery.js         libVES: VESrecovery interface
  *
  ***************************************************************************/
-libVES.Recovery = function(vaultKey) {
+libVES.Recovery = function(vaultKey, myItems) {
     this.vaultKey = vaultKey;
+    if (myItems) this.myItems = Promise.resolve(myItems);
 };
 
 libVES.Recovery.prototype = {
@@ -38,7 +39,7 @@ libVES.Recovery.prototype = {
 	var self = this;
 	return this.tokens = self.vaultKey.getType().then(function(t) {
 	    switch (t) {
-		case 'shadow': case 'recovery': return self.vaultKey.getField('vaultItems',{
+		case 'shadow': case 'recovery': return (self.myItems ? self.myItems : self.vaultKey.getField('vaultItems',{
 		    id: true,
 		    meta: true,
 		    type: true,
@@ -49,7 +50,7 @@ libVES.Recovery.prototype = {
 			    type: true
 			}
 		    }
-		},true).then(function(vis) {
+		},true)).then(function(vis) {
 		    var frnds = {};
 		    var fn = function() {
 			return self.vaultKey.getUser().then(function(my_u) {
@@ -199,7 +200,9 @@ libVES.Recovery.prototype = {
     _recover: function() {
 	var self = this;
 	return self.unlock().then(function() {
-	    return self.vaultKey.rekey();
+	    return self.vaultKey.VES.elevateAuth({authVaultKey: self.vaultKey}).then(function(optns) {
+		return self.vaultKey.rekey(optns);
+	    });
 	});
     },
     recover: function() {
