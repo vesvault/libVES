@@ -69,7 +69,8 @@ libVES.Cipher.prototype = {
 	if (!this.algo) return Promise.resolve(key);
 	return crypto.subtle.importKey('raw',key,this.algo,true,['encrypt','decrypt']);
     },
-    process: function(buf,final,callbk,chunkSize) {
+    process: function(buf,final,callbk,sizefn) {
+	var self = this;
 	buf = new Uint8Array(buf);
 	if (this.processBuf) {
 	    var b = new Uint8Array(buf.byteLength + this.processBuf.byteLength);
@@ -77,9 +78,24 @@ libVES.Cipher.prototype = {
 	    b.set(buf,this.processBuf.byteLength);
 	    buf = b;
 	}
-	var p = final ? buf.byteLength : (chunkSize ? Math.floor(buf.byteLength / chunkSize) * chunkSize : 0);
-	this.processBuf = p < buf.byteLength ? buf.slice(p) : null;
-	return p > 0 || final ? callbk(buf.slice(0,p)) : Promise.resolve(new Uint8Array(0));
+	var over = !final;
+	var fn = function(cprev) {
+	    var chunkSize = sizefn();
+	    if ((!buf.byteLength && over) || (!final && (!chunkSize || buf.byteLength < chunkSize))) {
+		self.processBuf = buf.byteLength ? buf : null;
+		return Promise.resolve(cprev);
+	    }
+	    var cl = (chunkSize && chunkSize < buf.byteLength) ? chunkSize : buf.byteLength;
+	    if (!chunkSize || cl < chunkSize) over = true;
+	    return callbk(buf.slice(0, cl)).then(function(ctext) {
+		buf = buf.slice(cl);
+		var r = new Uint8Array(cprev.byteLength + ctext.byteLength);
+		r.set(cprev, 0);
+		r.set(new Uint8Array(ctext), cprev.byteLength);
+		return r;
+	    }).then(fn);
+	};
+	return fn(new Uint8Array(0));
     },
     encryptChunk: function(buf) {
 	return Promise.all([this.key,this.algoInfo()]).then(function(info) {
@@ -95,10 +111,10 @@ libVES.Cipher.prototype = {
 	return Promise.resolve(this.algo);
     },
     encrypt: function(buf,final) {
-	return this.process(buf,final,this.encryptChunk.bind(this),this.chunkSizeP);
+	return this.process(buf,final,this.encryptChunk.bind(this),(function() { return this.chunkSizeP; }).bind(this));
     },
     decrypt: function(buf,final) {
-	return this.process(buf,final,this.decryptChunk.bind(this),this.chunkSizeC);
+	return this.process(buf,final,this.decryptChunk.bind(this),(function() { return this.chunkSizeC; }).bind(this));
     }
 };
 
@@ -119,6 +135,10 @@ libVES.Cipher.AES256GCM = function(rec) {
 };
 
 libVES.Cipher.AES256GCMp = function(rec) {
+    this.init(rec);
+};
+
+libVES.Cipher.AES256GCM1K = function(rec) {
     this.init(rec);
 };
 
@@ -187,5 +207,60 @@ libVES.Cipher.AES256GCMp.prototype = new libVES.Cipher.AES({
 	    var bufp = new Uint8Array(bufp0);
 	    return bufp.slice(1,bufp.byteLength - bufp[0]);
 	});
+    }
+});
+
+libVES.Cipher.AES256GCM1K.prototype = new libVES.Cipher.AES({
+    algo: 'AES-GCM',
+    keySize: 32,
+    ivSize: 12,
+    chunkSizeP: 1024,
+    chunkSizeC: 16,
+    algoInfo: function() {
+	var self = this;
+	if (!this.lastGCM) throw new libVES.Error('Internal', 'GCM HMAC is not buffered');
+	return this.IV.then(function(iv) {
+	    var buf = new Uint8Array(iv.byteLength + self.lastGCM.byteLength);
+	    buf.set(new Uint8Array(iv), 0);
+	    buf.set(new Uint8Array(self.lastGCM), iv.byteLength);
+	    return libVES.Util.Hash.SHA256.hash(buf).then(function(sha) {
+		return { name: self.algo, iv: sha.slice(0, self.ivSize) };
+	    });
+	});
+    },
+    encryptChunk: function(buf) {
+	var self = this;
+	var seed = null;
+	if (!this.lastGCM) {
+	    seed = new Uint8Array(16);
+	    crypto.getRandomValues(seed);
+	    this.lastGCM = seed;
+	}
+	return Promise.all([this.key, this.algoInfo()]).then(function(info) {
+	    return crypto.subtle.encrypt(info[1], info[0], buf).then(function(ctext) {
+		self.lastGCM = new Uint8Array(ctext.slice(-16));
+		if (!seed) return ctext;
+		var rs = new Uint8Array(seed.byteLength + ctext.byteLength);
+		rs.set(seed, 0);
+		rs.set(new Uint8Array(ctext), seed.byteLength);
+		return rs;
+	    });
+	});
+    },
+    decryptChunk: function(buf) {
+	var self = this;
+	if (buf.byteLength < 16) throw new libVES.Error('Crypto', 'Invalid ciphertext block size');
+	var rs;
+	if (this.lastGCM) {
+	    rs = Promise.all([this.key, this.algoInfo()]).then(function(info) {
+		self.lastGCM = buf.slice(-16);
+		return crypto.subtle.decrypt(info[1], info[0], buf);
+	    });
+	} else {
+	    rs = Promise.resolve(new Uint8Array(0));
+	    this.chunkSizeC = 1040;
+	    this.lastGCM = buf;
+	}
+	return rs;
     }
 });

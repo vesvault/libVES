@@ -443,7 +443,7 @@ libVES.VaultKey.prototype = new libVES.Object({
 	var self = this;
 	var old_vis = {};
 	return (self.vaultEntries ? self.vaultEntries.then(function(old_ves) {
-	    return old_ves.map(function(ve,i) {
+	    if (old_ves) return old_ves.map(function(ve,i) {
 		old_vis[ve.vaultItem.id] = true;
 	    });
 	}) : Promise.resolve(null)).then(function() {
@@ -547,7 +547,7 @@ libVES.VaultItem.prototype = new libVES.Object({
     apiUri: 'vaultItems',
     fieldList: {id: true},
     fieldClass: {vaultKey: libVES.VaultKey, file: libVES.File},
-    fieldSets: [{type: true, meta: true},{vaultEntries: {id: true, encData: true, vaultKey: {id: true, type: true, user: {id: true}}}},{vaultKey: true, file: true}],
+    fieldSets: [{type: true, meta: true},{vaultEntries: {id: true, encData: true, vaultKey: {id: true, type: true, user: {id: true}, algo: true}}},{vaultKey: true, file: true}],
     defaultCipher: 'AES256GCM',
     getRaw: function() {
 	var self = this;
@@ -561,7 +561,7 @@ libVES.VaultItem.prototype = new libVES.Object({
 			return new libVES.VaultKey(k, self.VES).decrypt(d).catch(fn);
 		    }
 		}
-		return Promise.reject(new libVES.Error('Invalid Key',"No unlocked key to decrypt the item",{vaultItem: self}));
+		return Promise.reject(new libVES.Error('InvalidKey',"No unlocked key to decrypt the item",{vaultItem: self}));
 	    };
 	    return fn();
 	};
@@ -570,7 +570,7 @@ libVES.VaultItem.prototype = new libVES.Object({
 	return f(vaultEntries, self.VES.unlockedKeys).catch(function() {
 	    return self.getVaultEntries().then(function(vaultEntries) {
 		return f(vaultEntries, self.VES.unlockedKeys).catch(function() {
-		    return self.getUnlockableKeys().then(function(vks) {
+		    return self.VES.getUnlockableKeys().then(function(vks) {
 			return f(vaultEntries, vks);
 		    });
 		});
@@ -592,7 +592,7 @@ libVES.VaultItem.prototype = new libVES.Object({
     getVaultEntries: function() {
 	var self = this;
 	return this.getField('vaultEntries').then(function(ves) {
-	    for (var i = 0; i < ves.length; i++) self.vaultEntryByKey[ves[i].vaultKey.id] = ves[i];
+	    if (ves) for (var i = 0; i < ves.length; i++) self.vaultEntryByKey[ves[i].vaultKey.id] = ves[i];
 	    return ves;
 	});
     },
