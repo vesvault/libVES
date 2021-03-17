@@ -366,19 +366,26 @@ libVES.Util = {
 	},
 	toJWK: function(key) {
 	    var der = libVES.Util.ASN1.decode(key)[0];
-	    if (der[1][0] != '1.2.840.10045.2.1') throw new libVES.Error('Internal', 'EC PKCS8 expected');
-	    var der2 = libVES.Util.ASN1.decode(der[2])[0];
-	    var pub;
-	    var publ = 0;
-	    if (der2[2]) {
-		pub = libVES.Util.ASN1.decode(der2[2])[0];
-		if (pub.byteLength > 2 && pub[1] == 4) publ = pub.byteLength / 2 - 1;
+	    var idx = 0;
+	    if (!(der[0] instanceof Array)) idx++;
+	    switch (String(der[idx][0])) {
+		case '1.2.840.10045.2.1':
+		case '1.3.132.1.12':
+		case '1.3.132.112': // Firefox on Mac - apparently a misspelling of the former
+		    break;
+		default:
+		    console.log(der);
+		    throw new libVES.Error('Internal', 'EC PKCS8 expected');
 	    }
+	    var der2 = idx ? libVES.Util.ASN1.decode(der[idx + 1])[0] : null;
+	    var pub = idx ? (der2[2] ? libVES.Util.ASN1.decode(der2[2])[0] : null) : der[1];
+	    var publ = 0;
+	    if (pub && pub.byteLength > 2 && pub[1] == 4) publ = pub.byteLength / 2 - 1;
 	    return {
-		crv: libVES.Util.EC.namedCurves[der[1][1]],
-		d: libVES.Util.ByteArrayToB64W(der2[1]),
+		crv: libVES.Util.EC.namedCurves[der[idx][1]],
+		d: (idx ? libVES.Util.ByteArrayToB64W(der2[1]) : undefined),
 		ext: true,
-		key_ops: ['deriveKey', 'deriveBits'],
+		key_ops: (idx ? ['deriveKey', 'deriveBits'] : []),
 		kty: 'EC',
 		x: (publ ? libVES.Util.ByteArrayToB64W(pub.slice(2, publ + 2)) : ''),
 		y: (publ ? libVES.Util.ByteArrayToB64W(pub.slice(publ + 2, 2 * publ + 2)) : '')
@@ -434,7 +441,8 @@ libVES.Util = {
 		return crypto.subtle.importKey('spki',der,a,true,[]).catch(function() {;
 		    return crypto.subtle.importKey('pkcs8',der,a,true,['deriveKey','deriveBits']).catch(function(e) {
 		        console.log('PKCS8 failed, trying JWK...');
-			return crypto.subtle.importKey('jwk', libVES.Util.PKCS8.toJWK(der), a, true, ['deriveKey', 'deriveBits']);
+			var jwk = libVES.Util.PKCS8.toJWK(der);
+			return crypto.subtle.importKey('jwk', jwk, a, true, jwk.key_ops);
 		    });
 		});
 	    });
@@ -515,7 +523,7 @@ libVES.Util.OID['1.2.840.113549.1.5.13'] = libVES.getModuleFunc(libVES, ['Util',
 libVES.Util.OID['1.2.840.113549.1.5.12'] = libVES.getModuleFunc(libVES, ['Util', 'PBKDF2']);
 libVES.Util.OID['2.16.840.1.101.3.4.1.42'] = libVES.getModuleFunc(libVES, ['Cipher', 'AES256CBC']);
 libVES.Util.OID['1.2.840.113549.1.1.1'] = libVES.getModuleFunc(libVES, ['Util', 'PKCS1']);
-libVES.Util.OID['1.2.840.10045.2.1'] = libVES.getModuleFunc(libVES, ['Util', 'EC']);
+libVES.Util.OID['1.2.840.10045.2.1'] = libVES.Util.OID['1.3.132.1.12'] = libVES.Util.OID['1.3.132.112'] = libVES.getModuleFunc(libVES, ['Util', 'EC']);
 libVES.Util.OID['1.2.840.113549.2.7'] = libVES.getModuleFunc(libVES, ['Util', 'Hash', 'SHA1']);
 libVES.Util.OID['1.2.840.113549.2.9'] = libVES.getModuleFunc(libVES, ['Util', 'Hash', 'SHA256']);
 libVES.Util.OID['1.2.840.113549.2.10'] = libVES.getModuleFunc(libVES, ['Util', 'Hash', 'SHA384']);

@@ -99,10 +99,29 @@ libVES.Algo = {
 	},
 	export: function(data,optns) {
 	    if (data instanceof CryptoKey) switch (data.type) {
-		case 'private': return libVES.Util.PKCS8.encode(data,optns);
-		case 'public': return libVES.Util.PKCS1.encode(data,optns);
+		case 'private': return libVES.Util.PKCS8.encode(data, optns);
+		case 'public':
+		    return crypto.subtle.exportKey('spki', data).then(function(der) {
+			var asn = libVES.Util.ASN1.decode(new Uint8Array(der))[0];
+			console.log(asn);
+			switch (String(asn[0][0])) {
+			    case '1.2.840.10045.2.1':
+				return der;
+			    case '1.3.132.1.12':
+			    case '1.3.132.112': // Firefox on Mac - apparently a misspelling of the former
+				asn[0][0] = new libVES.Util.OID('1.2.840.10045.2.1');
+				asn[1].ASN1type = 3;
+				return libVES.Util.ASN1.encode([asn]);
+			    default:
+				console.log(asn);
+				throw new libVES.Error('Internal', 'Unexpected EC pubkey format');
+			}
+			return der;
+		    }).then(function(der) {
+			return libVES.Util.PEM.encode(der, 'PUBLIC KEY');
+		    });
 	    }
-	    throw new libVES.Error('Internal',"Unknown type of key object");
+	    throw new libVES.Error('Internal', "Unknown type of key object");
 	},
 	generate: function(optns) {
 	    var op = {name:'ECDH', namedCurve:'P-384'};
