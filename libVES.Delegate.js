@@ -53,7 +53,8 @@ libVES.Delegate = {
 	return this.response = new Promise(function(resolve,reject) {
 	    self.reject = reject;
 	    self.resolve = resolve;
-	    var url = VES.wwwUrl + (VES.app ? 'session/delegate/' + encodeURIComponent(VES.app) + '/' : 'vv/unlock?via=delegate&url=' + encodeURIComponent(document.location.href) + '&domain=') + encodeURIComponent(VES.domain);
+	    var url = VES.wwwUrl + 'vv/unlock?via=delegate&url=' + encodeURIComponent(document.location.href) + '&domain=' + encodeURIComponent(VES.domain);
+	    if (optns) for (var k in optns) if (optns[k] != null) url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(optns[k]);
 	    self.setOrigin(url);
 	    self.showOverlay(self.htmlDlg.replace('{$url}',url));
 	    self.retryPopupCalled = 0;
@@ -88,7 +89,7 @@ libVES.Delegate = {
 		self.reject = reject;
 		self.resolve = resolve;
 		var ifrm = VES.wwwUrl + 'vv/flowin?url=' + encodeURIComponent(document.location.href) + '&domain=' + encodeURIComponent(VES.domain);
-		if (optns && optns.item) ifrm += '&item=' + encodeURIComponent(optns.item);
+		if (optns) for (var k in optns) if (optns[k] != null) ifrm += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(optns[k]);
 		self.setOrigin(ifrm);
 		window.addEventListener('message',self.listener.bind(self));
 		self.showOverlay(self.htmlFlw.replace('{$url}', ifrm));

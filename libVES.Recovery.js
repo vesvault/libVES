@@ -60,10 +60,15 @@ libVES.Recovery.prototype = {
 				    return Promise.all([
 					vi.getVaultEntries().then(function(ves) {
 					    return Promise.all(ves.map(function(ve) {
-						return new libVES.VaultKey(ve.vaultKey,self.vaultKey.VES).getUser().then(function(u) {
+						var vk = new libVES.VaultKey(ve.vaultKey,self.vaultKey.VES);
+						return vk.getUser().then(function(u) {
 						    return u.getId().then(function(uid) {
-							if (uid == my_uid) frnd.assisted = true;
-							else {
+							if (uid == my_uid) {
+							    frnd.assisted = true;
+							    return vk.getType().then(function(type) {
+								if (type == 'current') frnd.current = true;
+							    });
+							} else {
 							    frnd.user = u;
 							    frnds[uid] = frnd;
 							}

@@ -136,13 +136,46 @@ libVES.prototype = {
     delegate: function(optns) {
 	var self = this;
 	return libVES.getModule(libVES,'Delegate').then(function(dlg) {
-	    return dlg.login(self,null,optns);
+	    return dlg.login(self,null,optns).then(function() {
+		return self;
+	    });
 	});
+    },
+    getVESflow: function() {
+	var self = this;
+	if (!this.VESflow) this.VESflow = libVES.getModule(libVES, 'Flow').then(function(fw) {
+	    var flow = new fw('VES');
+	    var authf = self.authorize.bind(self);
+	    self.authorize = function(msg) {
+		flow.setValue(msg);
+		return authf(msg);
+	    };
+	    var outf = self.logout.bind(self);
+	    self.logout = function() {
+		flow.logout();
+		return outf();
+	    };
+	    return flow;
+	});
+	return this.VESflow;
     },
     flow: function(start, optns) {
 	var self = this;
-	return libVES.getModule(libVES, 'Delegate').then(function(dlg) {
-	    return dlg.flow(self, start, optns);
+	return self.getVESflow().then(function(flow) {
+	    return flow.get().then(function(auth) {
+		return self.authorize(auth);
+	    }).catch(function(e) {
+		if (!start || (e && e.code == 'Reload')) throw e;
+		var url = self.wwwUrl + 'vv/unlock?url=' + encodeURIComponent(document.location.href) + '&domain=' + encodeURIComponent(self.domain);
+		if (optns) for (var k in optns) if (optns[k] != null) url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(optns[k]);
+		flow.url = undefined;
+		return flow.setValue(undefined).then(function() {
+		    return flow.addToken(url).then(function(url) {
+			document.location.replace(url);
+			throw {code: 'Redirect', message: 'Starting VES Authorization...'};
+		    });
+		});
+	    });
 	});
     },
     authorize: function(msg) {
@@ -301,7 +334,18 @@ libVES.prototype = {
     _matchSecondaryKey: function(ext, user, appUrl) {
 	var self = this;
 	var m = function() {
-	    return libVES.getModule(libVES.Domain,ext.domain);
+	    return libVES.getModule(libVES.Domain,ext.domain).catch(function(e) {
+		return {
+		    userToVaultRef: function(u) {
+			return u.getEmail().then(function(email) {
+			    return email.toLowerCase();
+			});
+		    },
+		    vaultRefToUser: function(ext) {
+			return new libVES.User({email: ext.externalId}, self);
+		    }
+		};
+	    });
 	};
 	return (ext.externalId ? self.prepareExternals(ext) : m().then(function(dom) {
 	    return Promise.resolve(user || self.me()).then(function(u) {
@@ -571,30 +615,11 @@ libVES.prototype = {
     putValue: function(fileRef,value,shareWith) {
 	var self = this;
 	return this.getFileItem(fileRef).then(function(vaultItem) {
-	    return vaultItem.setField('type',libVES.VaultItem.Type._detect(value)).then(function(type) {
-		return vaultItem.getFile().then(function(file) {
-		    return file.getExternals().then(function(exts) {
-			return exts[0].getDomain().then(function(domain) {
-			    var m = libVES.getModule(libVES.Domain,domain);
-			    file.setField('path',m.then(function(mod) {
-				return mod.defaultFilePath(file,exts[0]);
-			    }).catch(function() {
-				return '';
-			    }));
-			    file.setField('name',m.then(function(mod) {
-				return mod.defaultFileName(file,exts[0]);
-			    }).catch(function() {
-				return null;
-			    }));
-			    return type;
-			});
-		    });
-		});
-	    }).then(function() {
+	    return vaultItem.setField('type',libVES.VaultItem.Type._detect(value)).then(function() {
 	        return Promise.resolve(shareWith || self.getFileItem(fileRef).then(function(vi) {
-	    	    return vi.getShareList();
-	    	}).catch(function(e) {
-		    return self.usersToKeys([{domain: fileRef.domain}]);
+		    return vi.getShareList();
+		}).catch(function(e) {
+		    return self.usersToKeys([{domain: (fileRef.domain || VES.domain)}]);
 		})).then(function(shareWith) {
 		    return vaultItem.shareWith(shareWith,value);
 		});

@@ -554,7 +554,7 @@ libVES.VaultItem.prototype = new libVES.Object({
 	var f = function(vaultEntries, vaultKeys) {
 	    var i = 0;
 	    var fn = function() {
-		for (; i < vaultEntries.length; i++) {
+		if (vaultEntries) for (; i < vaultEntries.length; i++) {
 		    var k, d;
 		    if ((d = vaultEntries[i].encData) != null && vaultKeys[(k = vaultEntries[i].vaultKey).id]) {
 			i++;
