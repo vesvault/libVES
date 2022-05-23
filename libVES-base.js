@@ -342,7 +342,9 @@ libVES.prototype = {
 			});
 		    },
 		    vaultRefToUser: function(ext) {
-			return new libVES.User({email: ext.externalId}, self);
+			var email = ext.externalId ? ext.externalId.replace(/\!.*/, '') : '';
+			if (!email.match(/\@/)) throw {code: 'NotFound', message: 'externalId is not an email for non-existing vault'};
+			return new libVES.User({email: email}, self);
 		    }
 		};
 	    });
@@ -354,7 +356,7 @@ libVES.prototype = {
 		return self.prepareExternals([ex]);
 	    });
 	}).catch(function(e) {
-	    throw new libVES.Error('NotFound','Cannot match externalId for domain:' + ext.domain + ', user:' + user + '. Define libVES.Domain.' + ext.domain + '.userToVaultRef(user) to return a valid reference.',{error: e});
+	    throw new libVES.Error('NotFound', 'Cannot match externalId for domain:' + ext.domain + ', user:' + user + '. Define libVES.Domain.' + ext.domain + '.userToVaultRef(user) to return a valid reference.',{error: e});
 	})).then(function(exts) {
 	    var vkey = new libVES.VaultKey({externals: exts, creator: self.me()},self);
 	    return vkey.getId().then(function() {
@@ -364,7 +366,7 @@ libVES.prototype = {
 		return Promise.resolve(user || m().then(function(dom) {
 		    return dom.vaultRefToUser(exts[0]);
 		})).catch(function(e) {
-		    throw new libVES.Error('NotFound','No matching secondary key (domain:' + ext.domain + ', externalId:' + ext.externalId + '). Supply "user" to create the temp key, or define libVES.Domain.' + ext.domain + '.vaultRefToUser(vaultRef) to return matching libVES.User',{error: e});
+		    throw new libVES.Error('NotFound', 'No matching secondary vault key',{error: e});
 		}).then(function(u) {
 		    return self.me().then(function(me) {
 			return Promise.all([me.getId(),u.getId()]).then(function(ids) {
@@ -540,6 +542,23 @@ libVES.prototype = {
 			    });
 			});
 		    });
+		});
+	    });
+	});
+    },
+    setAnonymousKey: function(veskey, optns) {
+	var self = this;
+	return this.prepareExternals({externalId: self.externalId}).then(function(ext) {
+	    if (!veskey) throw new libVES.Error('InvalidValue','VESkey cannot be empty');
+	    return (new libVES.VaultKey({type: 'secondary', algo: (optns && optns.algo ? optns.algo : self.keyAlgo), externals: ext},self)).generate(veskey, optns).then(function(k) {
+		return k.post(undefined, ['encSessionToken'], optns).then(function(post) {
+		    return k.setField('id', post.id, false).then(function() {
+			k.fieldUpdate = {id: true};
+		    });
+		}).catch(function(e) {
+		    if (!e || e.code != 'Unauthorized') throw e;
+		}).then(function() {
+		    return self.unlock(veskey);
 		});
 	    });
 	});

@@ -112,13 +112,13 @@ libVES.Delegate = {
 	return this.popupWindow = window.open(url,this.name,"width=600,height=600,top=100,left=100");
     },
     retryPopup: function(url,href) {
-	var f = this.retryPopupCalled;
 	this.retryPopupCalled++;
-	if (href && f > 1) href.target = '_blank';
-	else if (this.popupWindow) try {
+	if (this.popupWindow) try {
 	    this.popupWindow.focus();
+	    return true;
 	} catch(e) {}
-	return !f && this.openPopup(url);
+	this.openPopup(url);
+	return true;
     },
     listener: function(evnt) {
 	if (this.popup && evnt.origin == this.matchOrigin) try {
