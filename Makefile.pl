@@ -28,7 +28,7 @@
 # *
 # ***************************************************************************/
 
-@Src = ('libVES-base.js','libVES.Util.js','libVES.Math.js','libVES.Object.js','libVES.Algo.js','libVES.Cipher.js','libVES.Scramble.js','libVES.Recovery.js','libVES.Delegate.js','libVES.Flow.js');
+@Src = ('libVES-base.js','libVES.Util.js','libVES.Math.js','libVES.Object.js','libVES.Algo.js','libVES.Cipher.js','libVES.Scramble.js','libVES.Recovery.js','libVES.Delegate.js','libVES.Flow.js', 'libVES.Auth.js');
 
 open VER,'VERSION';
 chomp($Version = <VER>);
@@ -97,8 +97,11 @@ close(DST) || die "Failed to write to $Dst";
 
 open(DST,">$DstNode") || die "Failed to write to $DstNode";
 print DST $Head;
+print DST "crypto = require('crypto');\n";
+print DST "crypto.subtle = require('subtle');\n";
+print DST "XMLHttpRequest = require('xhr2');\n";
 print DST $result;
 print DST "\nmodule.exports = libVES;\n";
 close(DST) || die "Failed to write to $DstNode";
 
-`curl --data-urlencode input\@$Dst https://javascript-minifier.com/raw > $DstMin`;
+#`curl --data-urlencode input\@$Dst https://javascript-minifier.com/raw > $DstMin`;

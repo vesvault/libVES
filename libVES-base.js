@@ -28,12 +28,13 @@
  * libVES-base.js             libVES: Main file
  *
  ***************************************************************************/
-if (!window.libVES) window.libVES = function(optns) {
+
+if (typeof(libVES) != 'function') function libVES(optns) {
     try {
-	if (!window.crypto.subtle.digest) throw new libVES.Error('Init','crypto.subtle is improperly implemented?');
+	if (!crypto.subtle.digest) throw new libVES.Error('Init', 'crypto.subtle is unavailable or improperly implemented');
     } catch (e) {
 	if (e instanceof libVES.Error) throw e;
-	throw new libVES.Error('Init','crypto.subtle is not usable' + (document.location.protocol.match(/https/) ? '' : ' (try https?)'));
+	throw new libVES.Error('Init', 'crypto.subtle is not available');
     }
     for (var k in optns) this[k] = optns[k];
     if (this.domain) this.type = 'secondary';
@@ -579,7 +580,7 @@ libVES.prototype = {
 	}
 	if (!optns || !optns.n) return Promise.reject(new libVES.Error('InvalidValue','optns.n must be an integer'));
 	var rkey = new Uint8Array(32);
-	window.crypto.getRandomValues(rkey);
+	crypto.getRandomValues(rkey);
 	var algo = optns.v ? libVES.Scramble.algo[optns.v] : libVES.Scramble.RDX;
 	if (!algo) return Promise.reject(new libVES.Error('InvalidValue','Unknown scramble algorithm: ' + optns.v));
 	var s = new algo(optns.n);

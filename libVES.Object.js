@@ -31,7 +31,7 @@
  ***************************************************************************/
 libVES.Object = function(data) {
     for (var k in data) this[k] = data[k];
-    if (window.Trigger) this.trigger = Trigger.resolve(this);
+    if (typeof(Trigger) != 'undefined') this.trigger = Trigger.resolve(this);
 };
 
 libVES.Object.prototype = {

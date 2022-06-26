@@ -103,7 +103,6 @@ libVES.Algo = {
 		case 'public':
 		    return crypto.subtle.exportKey('spki', data).then(function(der) {
 			var asn = libVES.Util.ASN1.decode(new Uint8Array(der))[0];
-			console.log(asn);
 			switch (String(asn[0][0])) {
 			    case '1.2.840.10045.2.1':
 				return der;
@@ -223,7 +222,7 @@ libVES.Algo = {
     },
     acquire: function(key,optns) {
 	return Promise.resolve(key).then(function(k) {
-	    if (k instanceof window.CryptoKey) return k;
+	    if (typeof(CryptoKey) != 'undefined' && (k instanceof CryptoKey)) return k;
 	    else if (typeof(k) == 'object') {
 		if (k.privateKey) return k.privateKey;
 		else if (k.publicKey) return k.publicKey;

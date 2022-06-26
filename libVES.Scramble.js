@@ -51,7 +51,7 @@ libVES.Scramble.RDX.prototype = {
 	var u = [sc];
 	for (var i = 1; i < this.size; i++) {
 	    u[i] = new Uint8Array(sc.length);
-	    window.crypto.getRandomValues(u[i]);
+	    crypto.getRandomValues(u[i]);
 	}
 //	console.log('u',u);
 	var v = [];
