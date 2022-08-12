@@ -201,8 +201,12 @@ libVES.Flow.prototype.click = function(a) {
     var self = this;
     (a.origin == this.origin ? self.store() : self.addToken(a.href).then(function(url) {
 	a.href = url;
-    })).then(function() {
+    })).catch(function(e) {
+	if (!e || e.code != 'NotFound') throw e;
+    }).then(function() {
 	document.location.href = a.href;
+    }).catch(function(e) {
+	console.log(e);
     });
     return false;
 };

@@ -130,6 +130,10 @@ libVES.Cipher.AES256CBC = function(rec) {
     this.init(rec);
 };
 
+libVES.Cipher.AES256CFB = function(rec) {
+    this.init(rec);
+};
+
 libVES.Cipher.AES256GCM = function(rec) {
     this.init(rec);
 };
@@ -160,6 +164,7 @@ libVES.Cipher.AES.prototype = new libVES.Cipher({
 });
 
 libVES.Cipher.AES256CBC.prototype = new libVES.Cipher.AES({
+    a: 'AES256CBC',
     algo: 'AES-CBC',
     keySize: 32,
     ivSize: 16
@@ -183,6 +188,11 @@ libVES.Cipher.AES256CBC.info = function(chain,optns) {
     return Promise.resolve({algorithm: {name: 'AES-CBC', length: 256}});
 };
 
+libVES.Cipher.AES256CFB.prototype = new libVES.Cipher.AES({
+    a: 'AES256CFB',
+    algo: 'AES-CFB'
+});
+
 libVES.Cipher.AES256GCM.prototype = new libVES.Cipher.AES({
     algo: 'AES-GCM',
     keySize: 32,
@@ -190,6 +200,7 @@ libVES.Cipher.AES256GCM.prototype = new libVES.Cipher.AES({
 });
 
 libVES.Cipher.AES256GCMp.prototype = new libVES.Cipher.AES({
+    a: 'AES256GCMp',
     algo: 'AES-GCM',
     keySize: 32,
     ivSize: 12,
@@ -211,6 +222,7 @@ libVES.Cipher.AES256GCMp.prototype = new libVES.Cipher.AES({
 });
 
 libVES.Cipher.AES256GCM1K.prototype = new libVES.Cipher.AES({
+    a: 'AES256GCM1K',
     algo: 'AES-GCM',
     keySize: 32,
     ivSize: 12,

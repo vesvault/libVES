@@ -72,9 +72,12 @@ libVES.Delegate = {
 	    } catch(e) {
 		window.alert(self.htmlBlockerMsg);
 	    }
-	    window.addEventListener('message',self.listener.bind(self));
-	    window.addEventListener('focus',self.chkCancel.bind(self));
-	    window.addEventListener('beforeunload',self.cancel.bind(self));
+	    if (!self.listening) {
+		window.addEventListener('message',self.listener.bind(self));
+		window.addEventListener('focus',self.chkCancel.bind(self));
+		window.addEventListener('beforeunload',self.cancel.bind(self));
+		self.listening = true;
+	    }
 	    window.clearInterval(self.popupInterval);
 	    self.popupInterval = window.setInterval(self.chkCancel.bind(self),1000);
 	});

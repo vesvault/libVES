@@ -131,7 +131,7 @@ libVES.prototype = {
 	});
     },
     logout: function() {
-	this.token = undefined;
+	this.token = this.userMe = this.vaultKey = undefined;
 	return this.lock();
     },
     delegate: function(optns) {
@@ -181,11 +181,13 @@ libVES.prototype = {
     },
     authorize: function(msg) {
 	var self = this;
-	if (msg.token) this.token = msg.token;
-	if (msg.domain) this.domain = msg.domain;
-	if (msg.externalId) this.externalId = msg.externalId;
-	return (msg.VESkey ? this.unlock(msg.VESkey) : this.me()).then(function() {
-	    return self;
+	return this.logout().then(function() {
+	    if (msg.token) self.token = msg.token;
+	    if (msg.domain) self.domain = msg.domain;
+	    if (msg.externalId) self.externalId = msg.externalId;
+	    return (msg.VESkey ? self.unlock(msg.VESkey) : self.me()).then(function() {
+		return self;
+	    });
 	});
     },
     carry: function(optns) {
