@@ -1,0 +1,475 @@
+#wasm dir
+ROOT=$(shell pwd)
+
+# liboqs source path
+LIBOQS=/usr/src/liboqs
+
+#emcc, local cmd or docker
+EMCC=docker run --rm -v $(ROOT):$(ROOT) -v $(LIBOQS):$(LIBOQS) emscripten/emsdk emcc
+
+KEM=$(LIBOQS)/src/kem
+LDFLAGS=-L. -sMODULARIZE -s EXPORT_NAME="'WasmOQS'"
+EMOBJS=$(ROOT)/WasmOQS.emo
+OQSLIBS=$(KEM)/kem.ema
+TARGET=$(ROOT)/WasmOQS.js
+EMAR=emar
+CFLAGS=-I$(ROOT)/include -I$(LIBOQS)/include/ -I$(LIBOQS)/src/common/pqclean_shims/
+
+OQSOBJS=$(KEM)/saber/pqclean_saber_clean/verify.emo \
+	$(KEM)/saber/pqclean_saber_clean/SABER_indcpa.emo \
+	$(KEM)/saber/pqclean_saber_clean/kem.emo \
+	$(KEM)/saber/pqclean_saber_clean/poly_mul.emo \
+	$(KEM)/saber/pqclean_saber_clean/pack_unpack.emo \
+	$(KEM)/saber/pqclean_saber_clean/poly.emo \
+	$(KEM)/saber/pqclean_saber_clean/cbd.emo \
+	$(KEM)/saber/pqclean_lightsaber_clean/verify.emo \
+	$(KEM)/saber/pqclean_lightsaber_clean/SABER_indcpa.emo \
+	$(KEM)/saber/pqclean_lightsaber_clean/kem.emo \
+	$(KEM)/saber/pqclean_lightsaber_clean/poly_mul.emo \
+	$(KEM)/saber/pqclean_lightsaber_clean/pack_unpack.emo \
+	$(KEM)/saber/pqclean_lightsaber_clean/poly.emo \
+	$(KEM)/saber/pqclean_lightsaber_clean/cbd.emo \
+	$(KEM)/saber/kem_saber_lightsaber.emo \
+	$(KEM)/saber/pqclean_firesaber_clean/verify.emo \
+	$(KEM)/saber/pqclean_firesaber_clean/SABER_indcpa.emo \
+	$(KEM)/saber/pqclean_firesaber_clean/kem.emo \
+	$(KEM)/saber/pqclean_firesaber_clean/poly_mul.emo \
+	$(KEM)/saber/pqclean_firesaber_clean/pack_unpack.emo \
+	$(KEM)/saber/pqclean_firesaber_clean/poly.emo \
+	$(KEM)/saber/pqclean_firesaber_clean/cbd.emo \
+	$(KEM)/saber/kem_saber_firesaber.emo \
+	$(KEM)/saber/kem_saber_saber.emo \
+	$(KEM)/bike/additional_r3/aes_ctr_prf.bike11.emo \
+	$(KEM)/bike/additional_r3/gf2x_inv.bike11.emo \
+	$(KEM)/bike/additional_r3/sampling.bike11.emo \
+	$(KEM)/bike/additional_r3/decode.bike11.emo \
+	$(KEM)/bike/additional_r3/utilities.bike11.emo \
+	$(KEM)/bike/additional_r3/gf2x_mul_portable.bike11.emo \
+	$(KEM)/bike/additional_r3/kem.bike11.emo \
+	$(KEM)/bike/additional_r3/noop_main.bike11.emo \
+	$(KEM)/bike/additional_r3/decode_portable.bike11.emo \
+	$(KEM)/bike/additional_r3/gf2x_ksqr_portable.bike11.emo \
+	$(KEM)/bike/additional_r3/sampling_portable.bike11.emo \
+	$(KEM)/bike/additional_r3/gf2x_mul_base_portable.bike11.emo \
+	$(KEM)/bike/additional_r3/gf2x_mul.bike11.emo \
+	$(KEM)/bike/additional_r3/error.bike11.emo \
+	$(KEM)/bike/additional_r3/aes_ctr_prf.bike13.emo \
+	$(KEM)/bike/additional_r3/gf2x_inv.bike13.emo \
+	$(KEM)/bike/additional_r3/sampling.bike13.emo \
+	$(KEM)/bike/additional_r3/decode.bike13.emo \
+	$(KEM)/bike/additional_r3/utilities.bike13.emo \
+	$(KEM)/bike/additional_r3/gf2x_mul_portable.bike13.emo \
+	$(KEM)/bike/additional_r3/kem.bike13.emo \
+	$(KEM)/bike/additional_r3/noop_main.bike13.emo \
+	$(KEM)/bike/additional_r3/decode_portable.bike13.emo \
+	$(KEM)/bike/additional_r3/gf2x_ksqr_portable.bike13.emo \
+	$(KEM)/bike/additional_r3/sampling_portable.bike13.emo \
+	$(KEM)/bike/additional_r3/gf2x_mul_base_portable.bike13.emo \
+	$(KEM)/bike/additional_r3/gf2x_mul.bike13.emo \
+	$(KEM)/bike/additional_r3/error.bike13.emo \
+	$(KEM)/bike/kem_bike.emo \
+	$(KEM)/kem.emo \
+	$(KEM)/kyber/kem_kyber_768.kyber768.emo \
+	$(KEM)/kyber/kem_kyber_512.kyber512.emo \
+	$(KEM)/kyber/kem_kyber_1024.kyber1024.emo \
+	$(KEM)/kyber/kem_kyber_512_90s.kyber512-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512_ref/verify.kyber512.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512_ref/symmetric-shake.kyber512.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512_ref/indcpa.kyber512.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512_ref/kem.kyber512.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512_ref/poly.kyber512.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512_ref/polyvec.kyber512.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512_ref/ntt.kyber512.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512_ref/cbd.kyber512.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512_ref/reduce.kyber512.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024_ref/verify.kyber1024.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024_ref/symmetric-shake.kyber1024.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024_ref/indcpa.kyber1024.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024_ref/kem.kyber1024.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024_ref/poly.kyber1024.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024_ref/polyvec.kyber1024.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024_ref/ntt.kyber1024.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024_ref/cbd.kyber1024.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024_ref/reduce.kyber1024.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024-90s_ref/symmetric-aes.kyber1024-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024-90s_ref/verify.kyber1024-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024-90s_ref/indcpa.kyber1024-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024-90s_ref/kem.kyber1024-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024-90s_ref/poly.kyber1024-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024-90s_ref/polyvec.kyber1024-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024-90s_ref/ntt.kyber1024-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024-90s_ref/cbd.kyber1024-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber1024-90s_ref/reduce.kyber1024-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512-90s_ref/symmetric-aes.kyber512-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512-90s_ref/verify.kyber512-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512-90s_ref/indcpa.kyber512-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512-90s_ref/kem.kyber512-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512-90s_ref/poly.kyber512-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512-90s_ref/polyvec.kyber512-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512-90s_ref/ntt.kyber512-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512-90s_ref/cbd.kyber512-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber512-90s_ref/reduce.kyber512-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768_ref/verify.kyber768.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768_ref/symmetric-shake.kyber768.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768_ref/indcpa.kyber768.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768_ref/kem.kyber768.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768_ref/poly.kyber768.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768_ref/polyvec.kyber768.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768_ref/ntt.kyber768.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768_ref/cbd.kyber768.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768_ref/reduce.kyber768.emo \
+	$(KEM)/kyber/kem_kyber_768_90s.kyber768-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768-90s_ref/symmetric-aes.kyber768-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768-90s_ref/verify.kyber768-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768-90s_ref/indcpa.kyber768-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768-90s_ref/kem.kyber768-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768-90s_ref/poly.kyber768-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768-90s_ref/polyvec.kyber768-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768-90s_ref/ntt.kyber768-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768-90s_ref/cbd.kyber768-90s.emo \
+	$(KEM)/kyber/pqcrystals-kyber_kyber768-90s_ref/reduce.kyber768-90s.emo \
+	$(KEM)/kyber/kem_kyber_1024_90s.kyber1024-90s.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_sort_int32.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_stream_aes256ctr.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_decode_761x3.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_decode_761xint16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_decode_761xint32.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_encode_761x3.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_decode_256x16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/kem.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_encode_761x1531round.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_encode_256x16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_decode_256x2.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_encode_761x1531.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_sort_uint32.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_verify_1167.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_core_multsntrup761.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_encode_256x2.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_encode_761xint16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr761_clean/crypto_decode_761x1531.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_sort_int32.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_encode_1277xint16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_encode_1277x3.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_decode_1277x3.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_decode_1277xint16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_stream_aes256ctr.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_decode_1277xint32.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_decode_256x16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/kem.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_core_multsntrup1277.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_decode_1277x2627.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_verify_1975.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_encode_256x16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_decode_256x2.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_sort_uint32.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_encode_1277x2627.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_encode_1277x2627round.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr1277_clean/crypto_encode_256x2.emo \
+	$(KEM)/ntruprime/kem_ntruprime_sntrup761.emo \
+	$(KEM)/ntruprime/kem_ntruprime_ntrulpr653.emo \
+	$(KEM)/ntruprime/kem_ntruprime_ntrulpr761.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_sort_int32.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_encode_761x4591.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_encode_int16.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_decode_761x3.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_core_weightsntrup761.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_decode_761xint16.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_core_wforcesntrup761.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_decode_761xint32.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_encode_761x3.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/kem.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_core_mult3sntrup761.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_core_scale3sntrup761.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_encode_761xfreeze3.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_encode_761x1531round.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_verify_1039.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_decode_761x4591.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_core_inv3sntrup761.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_encode_761x1531.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_sort_uint32.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_core_invsntrup761.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_core_multsntrup761.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_encode_761xint16.emo \
+	$(KEM)/ntruprime/pqclean_sntrup761_clean/crypto_decode_761x1531.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_sort_int32.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_core_multsntrup653.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_stream_aes256ctr.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_decode_256x16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/kem.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_decode_653xint32.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_encode_653x3.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_verify_1025.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_decode_653x1541.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_encode_256x16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_encode_653x1541round.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_decode_256x2.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_sort_uint32.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_encode_653xint16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_decode_653xint16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_encode_653x1541.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_encode_256x2.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr653_clean/crypto_decode_653x3.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_sort_int32.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_core_mult3sntrup653.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_core_multsntrup653.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_encode_653xfreeze3.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_encode_int16.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_verify_897.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_core_invsntrup653.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_core_weightsntrup653.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_encode_653x4621.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/kem.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_decode_653xint32.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_decode_653x4621.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_encode_653x3.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_decode_653x1541.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_core_inv3sntrup653.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_encode_653x1541round.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_sort_uint32.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_encode_653xint16.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_decode_653xint16.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_core_scale3sntrup653.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_core_wforcesntrup653.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_encode_653x1541.emo \
+	$(KEM)/ntruprime/pqclean_sntrup653_clean/crypto_decode_653x3.emo \
+	$(KEM)/ntruprime/kem_ntruprime_sntrup653.emo \
+	$(KEM)/ntruprime/kem_ntruprime_ntrulpr1277.emo \
+	$(KEM)/ntruprime/kem_ntruprime_ntrulpr857.emo \
+	$(KEM)/ntruprime/kem_ntruprime_sntrup857.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_sort_int32.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_core_inv3sntrup1277.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_encode_1277xint16.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_encode_1277x3.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_decode_1277x3.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_encode_int16.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_decode_1277x7879.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_decode_1277xint16.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_core_weightsntrup1277.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_encode_1277x7879.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_decode_1277xint32.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_core_wforcesntrup1277.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/kem.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_core_multsntrup1277.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_decode_1277x2627.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_core_scale3sntrup1277.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_core_invsntrup1277.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_sort_uint32.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_encode_1277x2627.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_verify_1847.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_core_mult3sntrup1277.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_encode_1277x2627round.emo \
+	$(KEM)/ntruprime/pqclean_sntrup1277_clean/crypto_encode_1277xfreeze3.emo \
+	$(KEM)/ntruprime/kem_ntruprime_sntrup1277.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_sort_int32.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_encode_857x1723.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_core_scale3sntrup857.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_core_wforcesntrup857.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_encode_int16.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_core_inv3sntrup857.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_encode_857x5167.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_decode_857xint16.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_encode_857xint16.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_decode_857x3.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_decode_857x1723.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_core_invsntrup857.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_core_multsntrup857.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_verify_1184.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/kem.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_core_mult3sntrup857.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_encode_857x1723round.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_decode_857xint32.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_sort_uint32.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_core_weightsntrup857.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_decode_857x5167.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_encode_857xfreeze3.emo \
+	$(KEM)/ntruprime/pqclean_sntrup857_clean/crypto_encode_857x3.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_sort_int32.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_encode_857x1723.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_verify_1312.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_stream_aes256ctr.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_decode_857xint16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_encode_857xint16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_decode_857x3.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_decode_857x1723.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_core_multsntrup857.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_decode_256x16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/kem.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_encode_857x1723round.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_encode_256x16.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_decode_857xint32.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_decode_256x2.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_sort_uint32.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_encode_256x2.emo \
+	$(KEM)/ntruprime/pqclean_ntrulpr857_clean/crypto_encode_857x3.emo \
+	$(KEM)/ntru/kem_ntru_hps2048677.emo \
+	$(KEM)/ntru/kem_ntru_hps2048509.emo \
+	$(KEM)/ntru/kem_ntru_hrss1373.emo \
+	$(KEM)/ntru/kem_ntru_hrss701.emo \
+	$(KEM)/ntru/kem_ntru_hps4096821.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/cmov.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/poly_mod.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/poly_lift.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/poly_s3_inv.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/sample_iid.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/packq.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/pack3.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/kem.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/poly_rq_mul.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/owcpa.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/poly.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/poly_r2_inv.emo \
+	$(KEM)/ntru/pqclean_ntruhrss1373_clean/sample.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/cmov.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/poly_mod.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/crypto_sort_int32.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/poly_lift.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/poly_s3_inv.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/sample_iid.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/packq.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/pack3.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/kem.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/poly_rq_mul.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/owcpa.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/poly.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/poly_r2_inv.emo \
+	$(KEM)/ntru/pqclean_ntruhps4096821_clean/sample.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/cmov.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/poly_mod.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/crypto_sort_int32.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/poly_lift.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/poly_s3_inv.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/sample_iid.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/packq.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/pack3.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/kem.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/poly_rq_mul.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/owcpa.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/poly.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/poly_r2_inv.emo \
+	$(KEM)/ntru/pqclean_ntruhps40961229_clean/sample.emo \
+	$(KEM)/ntru/kem_ntru_hps40961229.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/cmov.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/poly_mod.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/poly_lift.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/poly_s3_inv.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/sample_iid.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/packq.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/pack3.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/kem.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/poly_rq_mul.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/owcpa.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/poly.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/poly_r2_inv.emo \
+	$(KEM)/ntru/pqclean_ntruhrss701_clean/sample.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/cmov.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/poly_mod.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/crypto_sort_int32.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/poly_lift.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/poly_s3_inv.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/sample_iid.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/packq.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/pack3.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/kem.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/poly_rq_mul.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/owcpa.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/poly.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/poly_r2_inv.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048677_clean/sample.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/cmov.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/poly_mod.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/crypto_sort_int32.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/poly_lift.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/poly_s3_inv.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/sample_iid.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/packq.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/pack3.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/kem.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/poly_rq_mul.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/owcpa.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/poly.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/poly_r2_inv.emo \
+	$(KEM)/ntru/pqclean_ntruhps2048509_clean/sample.emo \
+	$(KEM)/hqc/kem_hqc_128.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-128_clean/parsing.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-128_clean/gf.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-128_clean/reed_muller.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-128_clean/hqc.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-128_clean/fft.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-128_clean/kem.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-128_clean/code.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-128_clean/vector.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-128_clean/gf2x.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-128_clean/reed_solomon.emo \
+	$(KEM)/hqc/kem_hqc_192.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-256_clean/parsing.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-256_clean/gf.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-256_clean/reed_muller.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-256_clean/hqc.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-256_clean/fft.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-256_clean/kem.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-256_clean/code.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-256_clean/vector.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-256_clean/gf2x.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-256_clean/reed_solomon.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-192_clean/parsing.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-192_clean/gf.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-192_clean/reed_muller.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-192_clean/hqc.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-192_clean/fft.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-192_clean/kem.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-192_clean/code.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-192_clean/vector.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-192_clean/gf2x.emo \
+	$(KEM)/hqc/pqclean_hqc-rmrs-192_clean/reed_solomon.emo \
+	$(KEM)/hqc/kem_hqc_256.emo \
+	$(KEM)/../common/common.emo \
+	$(KEM)/../common/rand/rand.emo \
+	$(KEM)/../common/aes/aes.emo \
+	$(KEM)/../common/aes/aes_c.emo \
+	$(KEM)/../common/sha2/sha2.emo \
+	$(KEM)/../common/sha2/sha2_c.emo \
+	$(KEM)/../common/sha3/xkcp_sha3.emo \
+	$(KEM)/../common/sha3/xkcp_low/KeccakP-1600/plain-64bits/KeccakP-1600-opt64.emo \
+	$(KEM)/../common/pqclean_shims/fips202.emo \
+	$(KEM)/../common/pqclean_shims/fips202x4.emo \
+	$(KEM)/../common/pqclean_shims/nistseedexpander.emo
+
+
+all:	$(EMOBJS) $(OQSLIBS)
+	$(EMCC) $(LDFLAGS) -o $(TARGET) $(EMOBJS) $(OQSLIBS)
+
+$(KEM)/kem.ema:	$(OQSOBJS)
+	$(EMAR) cru $@ $(OQSOBJS)
+
+$(ROOT)/%.emo:	$(ROOT)/%.c
+	$(EMCC) $(CFLAGS) -c -o $@ $<
+
+$(KEM)/%.emo:	$(KEM)/%.c
+	$(EMCC) $(CFLAGS) -c -o $@ $<
+
+$(KEM)/%.bike11.emo:	$(KEM)/%.c
+	$(EMCC) $(CFLAGS) -include $(KEM)/bike/functions_renaming.h -DLEVEL=1 -DFUNC_PREFIX=OQS_KEM_bike_l1 -c -o $@ $<
+
+$(KEM)/%.bike13.emo:	$(KEM)/%.c
+	$(EMCC) $(CFLAGS) -include $(KEM)/bike/functions_renaming.h -DLEVEL=3 -DFUNC_PREFIX=OQS_KEM_bike_l3 -c -o $@ $<
+
+$(KEM)/%.kyber512.emo:	$(KEM)/%.c
+	$(EMCC) $(CFLAGS) -DKYBER_K=2 -c -o $@ $<
+
+$(KEM)/%.kyber768.emo:	$(KEM)/%.c
+	$(EMCC) $(CFLAGS) -DKYBER_K=3 -c -o $@ $<
+
+$(KEM)/%.kyber1024.emo:	$(KEM)/%.c
+	$(EMCC) $(CFLAGS) -DKYBER_K=4 -c -o $@ $<
+
+$(KEM)/%.kyber512-90s.emo:	$(KEM)/%.c
+	$(EMCC) $(CFLAGS) -DKYBER_K=2 -DKYBER_90S -c -o $@ $<
+
+$(KEM)/%.kyber768-90s.emo:	$(KEM)/%.c
+	$(EMCC) $(CFLAGS) -DKYBER_K=3 -DKYBER_90S -c -o $@ $<
+
+$(KEM)/%.kyber1024-90s.emo:	$(KEM)/%.c
+	$(EMCC) $(CFLAGS) -DKYBER_K=4 -DKYBER_90S -c -o $@ $<
+
+clean:
+	rm -f $(EMOBJS) $(OQSOBJS) $(OQSLIBS)

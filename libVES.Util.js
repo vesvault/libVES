@@ -307,7 +307,17 @@ libVES.Util = {
 	}
     },
     PKCS8: {
-	encode: function(key,optns) {
+	encode: function(key, optns) {
+	    return crypto.subtle.exportKey('pkcs8',key).catch(function(e) {
+		console.log('PKCS8 failed, trying JWK...');
+		return crypto.subtle.exportKey('jwk', key).then(function(jwk) {
+		    return libVES.Util.PKCS8.fromJWK(jwk);
+		});
+	    }).then(function(pkcs8) {
+		return libVES.Util.PKCS8.encode8(pkcs8, optns);
+	    });
+	},
+	encode8: function(pkcs8, optns) {
 	    var ops = {};
 	    for (var k in optns) ops[k] = optns[k];
 	    if (!ops.members) ops.members = [
@@ -316,24 +326,17 @@ libVES.Util = {
 	    ];
 	    return Promise.all(ops.members).then(function(ms) {
 		ops.members = ms;
-		return crypto.subtle.exportKey('pkcs8',key).catch(function(e) {
-		    console.log('PKCS8 failed, trying JWK...');
-		    return crypto.subtle.exportKey('jwk', key).then(function(jwk) {
-			return libVES.Util.PKCS8.fromJWK(jwk);
-		    });
-		}).then(function(der) {
-		    ops.content = der;
-		    var rec = [];
-		    if (ops.password) return libVES.Util.PKCS5.export(function(call,optns) {
-			rec[1] = optns.content;
-			return Promise.resolve();
-		    },ops).then(function(data) {
-			rec[0] = data;
-			return libVES.Util.PEM.encode(libVES.Util.ASN1.encode([rec]),'ENCRYPTED PRIVATE KEY');
-		    });
-		    else if (ops.opentext) return libVES.Util.PEM.encode(der,'PRIVATE KEY');
-		    else throw new libVES.Error('Internal','No password for key export (opentext=true to export without password?)');
+		ops.content = pkcs8;
+		var rec = [];
+		if (ops.password) return libVES.Util.PKCS5.export(function(call,optns) {
+		    rec[1] = optns.content;
+		    return Promise.resolve();
+		},ops).then(function(data) {
+		    rec[0] = data;
+		    return libVES.Util.PEM.encode(libVES.Util.ASN1.encode([rec]),'ENCRYPTED PRIVATE KEY');
 		});
+		else if (ops.opentext) return libVES.Util.PEM.encode(pkcs8,'PRIVATE KEY');
+		else throw new libVES.Error('Internal','No password for key export (opentext=true to export without password?)');
 	    });
 	},
 	fromJWK: function(jwk) {
@@ -528,3 +531,4 @@ libVES.Util.OID['1.2.840.113549.2.7'] = libVES.getModuleFunc(libVES, ['Util', 'H
 libVES.Util.OID['1.2.840.113549.2.9'] = libVES.getModuleFunc(libVES, ['Util', 'Hash', 'SHA256']);
 libVES.Util.OID['1.2.840.113549.2.10'] = libVES.getModuleFunc(libVES, ['Util', 'Hash', 'SHA384']);
 libVES.Util.OID['1.2.840.113549.2.11'] = libVES.getModuleFunc(libVES, ['Util', 'Hash', 'SHA512']);
+libVES.Util.OID['1.3.6.1.4.1.53675.3.5'] = libVES.getModuleFunc(libVES, ['Algo', 'OQS', 'Util']);
