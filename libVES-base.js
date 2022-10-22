@@ -419,7 +419,14 @@ libVES.prototype = {
 	    if (self.e2e && self.e2e.length) usr.e2e = self.getVESkeyE2E(veskey, usr);
 	    key.setField('vaultItems', veskey.then(function(v) {
 		var vi = new libVES.VaultItem({type: 'password'}, self);
-		return Promise.all(self.type == 'secondary' ? [self.me(), self.getVaultKey()] : [self.me()]).then(function(sh) {
+		return usr.getActiveVaultKeys().then(function() {
+		    return [self.me(), self.getVaultKey(), usr];
+		}).catch(function(e) {
+		    if (e.code != 'NotFound') throw e;
+		    return self.type == 'secondary' ? [self.me(), self.getVaultKey()] : [self.me()];
+		}).then(function(sh) {
+		    return Promise.all(sh);
+		}).then(function(sh) {
 		    return vi.shareWith(sh, v, false).then(function() {
 			return [vi];
 		    });
