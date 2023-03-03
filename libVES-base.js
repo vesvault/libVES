@@ -284,12 +284,14 @@ libVES.prototype = {
 	var self = this;
 	return this.getVaultKey().then(function(k) {
 	    return k.getId().then(function(kid) {
-		return k.getVaultEntries().then(function(ves) {
+		return k.getVaultEntries({type: true, deleted: true, file: {creator: true, externals: true}, vaultKey: {type: true, user: true}}).then(function(ves) {
 		    var vis = {};
 		    var vlst = [];
 		    for (var i = 0; i < ves.length; i++) {
 			var viid = ves[i].vaultItem.id;
 			if (!vis[viid]) {
+			    ves[i].vaultItem.file ||= undefined;
+			    ves[i].vaultItem.vaultKey ||= undefined;
 			    var vi = vis[viid] = self.getItem(ves[i].vaultItem);
 			    vlst.push(vi);
 			    vi.vaultEntryByKey[kid] = ves[i];
@@ -671,8 +673,8 @@ libVES.prototype = {
 	});
     },
     deleteFile: function(fileRef) {
-	return this.getFile(fileRef).then(function(file) {
-	    return file.delete();
+	return this.getFileItem(fileRef).then(function(item) {
+	    return item.delete();
 	});
     },
     newSecret: function(cls) {

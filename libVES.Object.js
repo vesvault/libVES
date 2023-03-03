@@ -60,7 +60,7 @@ libVES.Object.prototype = {
 		    if (self.fieldClass[k]) return (clsf = function(v) {
 			if (v instanceof libVES.Object) return v;
 			else if (v instanceof Array) return v.map(function(vv) { return clsf(vv); });
-			else return new (self.fieldClass[k])(v,self.VES);
+			else if (v) return new (self.fieldClass[k])(v,self.VES);
 		    })(v);
 		    return v;
 		};
@@ -724,6 +724,12 @@ libVES.VaultItem.prototype = new libVES.Object({
 		for (var i = 0; i < lst.length; i++) if (lst[i]) rs.push(lst[i]);
 		return rs;
 	    });
+	});
+    },
+    delete: function() {
+	var self = this;
+	return self.getId().then(function(id) {
+	    return this.VES.post(self.apiUri + '/' + id, {'$op': 'delete'});
 	});
     }
 });

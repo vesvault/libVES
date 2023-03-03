@@ -150,12 +150,12 @@ libVES.Algo.OQS = {
 };
 
 var WasmOQSinit = {
-    init: function(algo, priv) {
+    init: function(algo, fpriv) {
         var a = new Uint8Array(libVES.Util.StringToByteArray(algo));
         var arg1 = new Uint8Array(this.asm.memory.buffer, 16, 48);
         arg1.set(a);
         arg1.set([0], a.byteLength);
-        var ptr = this._WasmOQS_new(arg1.byteOffset, priv);
+        var ptr = this._WasmOQS_new(arg1.byteOffset, fpriv);
         if (!ptr) return null;
         var key = { ptr: ptr };
         var priv = this._WasmOQS_priv(ptr);
