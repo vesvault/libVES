@@ -32,15 +32,9 @@
 libVES.Algo.OQS = {
     tag: 'OQS',
     wasm: function() {
-	if (!this.wasmP) this.wasmP = new Promise(function(resolve, reject) {
-	    if (typeof(WasmOQS) == 'function') return resolve();
-	    var sc = document.createElement('script');
-	    sc.async = false;
-	    sc.src = WasmOQSinit.baseUrl + 'WasmOQS.js';
-	    sc.onload = resolve;
-	    sc.onerror = reject;
-	    document.getElementsByTagName('head')[0].appendChild(sc);
-	}).then(function() {
+	if (!this.wasmP) this.wasmP = (typeof(WasmOQS) == 'function' ? Promise.resolve()
+	    : libVES.Util.loadWasm(WasmOQSinit.baseUrl + 'WasmOQS.js')
+	).then(function() {
 	    return WasmOQS(WasmOQSinit);
 	});
 	return this.wasmP;
@@ -91,56 +85,40 @@ libVES.Algo.OQS = {
     },
     export: function(data, optns) {
 	if (!data || !data.ptr) throw new libVES.Error('Internal', "Unknown type of key object");
-	var pub = new Uint8Array(data.pub.byteLength + 1);
-	pub[0] = 0;
-	pub.set(new Uint8Array(data.pub), 1);
-	pub.ASN1type = 3;
 	var oid = [new libVES.Util.OID(libVES.Algo.OQS.OID), libVES.Util.StringToByteArray(data.algo)];
-	if (data.priv) {
-	    pub = libVES.Util.ASN1.encode([pub]);
-	    pub.ASN1type = 0xa1;
-	    var buf = libVES.Util.ASN1.encode([[1, data.priv, pub]]);
-	    var pkcs8 = libVES.Util.ASN1.encode([[0, oid, buf]]);
-	    return libVES.Util.PKCS8.encode8(pkcs8, optns);
-	}
-	return libVES.Util.PEM.encode(libVES.Util.ASN1.encode([[oid, pub]]), 'PUBLIC KEY');
+	return libVES.Util.Key.export(data.pub, data.priv, oid, optns);
     },
     generate: function(optns) {
-	var algo = optns ? optns.algo : null;
+	var algo = optns ? optns.oqsAlgo : null;
 	if (!algo) algo = this.defaultAlgo;
 	return this.wasm().then(function(wasm) {
 	    var k = wasm.init(algo, true);
 	    if (!k) throw new libVES.Error('InvalidValue', 'OQS key init failed');
 	    if (!wasm.generate(k)) throw new libVES.Error('Internal', 'OQS generate failed');
-	    var pub = {};
+	    var pub = new wasm.Key(k.algo);
 	    for (var i in k) if (i != 'priv') pub[i] = k[i];
 	    return {privateKey: k, publicKey: pub};
 	});
+    },
+    getKeyOptions: function(key) {
+	return {oqsAlgo: k.algo};
     },
     Util: {
 	import: function(args,chain,optns) {
 	    var algo = libVES.Util.ByteArrayToString(args);
 	    return chain('container').then(function(der) {
-		var asn = libVES.Util.ASN1.decode(der)[0];
-		var pkey = null;
-		var pub = null;
-		if (typeof(asn[0]) == 'number') {
-		    var asn2 = libVES.Util.ASN1.decode(asn[2])[0];
-		    pkey = asn2[1];
-		    pub = libVES.Util.ASN1.decode(asn2[2])[0];
-		} else pkey = asn[1];
-		return libVES.Algo.OQS.wasm().then(function(wasm) {
-		    var k = wasm.init(algo, !!pub);
-		    if (!k) throw new libVES.Error('InvalidValue', 'OQS key init failed (bad algo?)');
-		    var s = function(dst, src, dif) {
-			if (!dst || !src || dst.byteLength != src.byteLength - dif) throw new libVES.Error('InvalidValue', 'Incorrect OQS key size');
-			dst.set(src.slice(dif), 0);
-		    };
-		    if (pub) {
-			s(k.priv, pkey, 0);
-			s(k.pub, pub, 1);
-		    } else s(k.pub, pkey, 1);
-		    return k;
+		return libVES.Util.Key.fromDER(der, function(pub, priv, pubBits) {
+		    return libVES.Algo.OQS.wasm().then(function(wasm) {
+			var k = wasm.init(algo, !!priv);
+			if (!k) throw new libVES.Error('InvalidValue', 'OQS key init failed (bad algo?)');
+			var s = function(dst, src) {
+			    if (!dst || !src || dst.byteLength != src.byteLength) throw new libVES.Error('InvalidValue', 'Incorrect OQS key size');
+			    dst.set(src, 0);
+			};
+			if (priv) s(k.priv, priv);
+			s(k.pub, pub);
+			return k;
+		    });
 		});
 	    });
 	}
@@ -150,6 +128,9 @@ libVES.Algo.OQS = {
 };
 
 var WasmOQSinit = {
+    Key: function(algo) {
+	this.algo = algo;
+    },
     init: function(algo, fpriv) {
         var a = new Uint8Array(libVES.Util.StringToByteArray(algo));
         var arg1 = new Uint8Array(this.asm.memory.buffer, 16, 48);
@@ -157,13 +138,13 @@ var WasmOQSinit = {
         arg1.set([0], a.byteLength);
         var ptr = this._WasmOQS_new(arg1.byteOffset, fpriv);
         if (!ptr) return null;
-        var key = { ptr: ptr };
+        var key = new this.Key(algo);
+        key.ptr = ptr;
         var priv = this._WasmOQS_priv(ptr);
         if (priv) key.priv = new Uint8Array(this.asm.memory.buffer, priv, this._WasmOQS_privlen(ptr));
         key.pub = new Uint8Array(this.asm.memory.buffer, this._WasmOQS_pub(ptr), this._WasmOQS_publen(ptr));
         key.secretlen = this._WasmOQS_decaps(key.ptr, null, null);
         key.ctextlen = this._WasmOQS_encaps(key.ptr, null, null);
-        key.algo = algo;
         return key;
     },
     generate: function(key) {

@@ -47,6 +47,7 @@ libVES.prototype = {
     apiUrl: 'https://api.ves.host/v1/',
     wwwUrl: 'https://www.vesvault.com/',
     keyAlgo: 'ECDH',
+    keyOptions: {namedCurve: 'P-521'},
     textCipher: 'AES256GCMp',
     defaultHash: 'SHA256',
     
@@ -650,7 +651,7 @@ libVES.prototype = {
 	        return Promise.resolve(shareWith || self.getFileItem(fileRef).then(function(vi) {
 		    return vi.getShareList();
 		}).catch(function(e) {
-		    return self.usersToKeys([{domain: (fileRef.domain || VES.domain)}]);
+		    return self.usersToKeys([{domain: VES.domain, externalId: VES.externalId}]);
 		})).then(function(shareWith) {
 		    return vaultItem.shareWith(shareWith,value);
 		});
@@ -863,6 +864,17 @@ libVES.prototype = {
 		}
 	    });
 	}));
+    },
+    setKeyAlgo: function(optns) {
+	if (typeof(optns) == 'string') {
+	    this.keyOptions = null;
+	    return this.keyAlgo = optns;
+	}
+	var algo = libVES.Algo.fromKeyOptions(optns);
+	if (algo) {
+	    this.keyOptions = optns;
+	    return this.keyAlgo = algo;
+	}
     }
 };
 

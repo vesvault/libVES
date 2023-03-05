@@ -389,12 +389,19 @@ libVES.VaultKey.prototype = new libVES.Object({
 	});
     },
     generate: function(veskey,optns) {
+	if (this.VES.keyOptions) {
+	    var o = optns;
+	    optns = {};
+	    for (var k in this.VES.keyOptions) optns[k] = this.VES.keyOptions[k];
+	    if (o) for (var k in o) optns[k] = o[k];
+	}
 	var self = this;
+	var a;
 	var wc = optns && optns.privateKey ? libVES.Algo.acquire(optns.privateKey).then(function(wc) {
 	    self.setField('algo',wc.engine.tag);
 	    if (!wc.privateKey) throw new libVES.Error('InvalidValue','Private key expected');
 	    return wc;
-	}) : (optns && optns.algo ? self.setField('algo',optns.algo) : Promise.resolve()).then(function() {
+	}) : (optns && (a = libVES.Algo.fromKeyOptions(optns)) ? self.setField('algo', a) : Promise.resolve()).then(function() {
 	    return self.engine().then(function(e) {
 		return e.generate(optns).then(function(ks) {
 		    ks.engine = e;
@@ -540,6 +547,14 @@ libVES.VaultKey.prototype = new libVES.Object({
     },
     matchVaults: function(vaultKeys) {
 	return Promise.resolve(false);
+    },
+    getKeyOptions: function() {
+	var self = this;
+	return self.engine().then(function(e) {
+	    return self.getPublicCryptoKey().then(function(pub) {
+		return e.getKeyOptions(pub);
+	    });
+	});
     }
 });
 

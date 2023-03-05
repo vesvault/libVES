@@ -32,6 +32,7 @@
 libVES.Algo = {
     ECDH: {
 	tag: 'ECDH',
+	defaultCurve: 'P-521',
 	decrypt: function(k,buf) {
 	    var b = new Uint8Array(buf);
 	    var data = libVES.Util.ASN1.decode(b);
@@ -55,7 +56,12 @@ libVES.Algo = {
 	    return libVES.Algo.ECDH.eKey(k).then(function(eKey) {
 		return libVES.Algo.ECDH.cipher(eKey.privateKey,k).then(function(ci) {
 		    return Promise.all([
-			crypto.subtle.exportKey('spki',eKey.publicKey),
+			((k instanceof CryptoKey)
+			    ? crypto.subtle.exportKey('spki',eKey.publicKey)
+			    : libVES.Algo.ECDH.wasm().then(function(wasm) {
+				return libVES.Util.Key.toPKCS(wasm.getpub(eKey.publicKey), null, libVES.Algo.ECDH.asn1hdr(wasm.getoid(eKey.publicKey)));
+			    })
+			),
 			ci.encrypt(buf,true)
 		    ]).then(function(bufs) {
 			var buf = new Uint8Array(bufs[0].byteLength + bufs[1].byteLength);
@@ -70,21 +76,32 @@ libVES.Algo = {
 	    });
 	},
 	eKey: function(pub) {
-	    return crypto.subtle.exportKey('jwk',pub).then(function(kdata) {
+	    if (pub instanceof CryptoKey) return crypto.subtle.exportKey('jwk',pub).then(function(kdata) {
 		return crypto.subtle.generateKey({name:'ECDH',namedCurve: kdata.crv},true,['deriveKey','deriveBits']).catch(function(e) {
 		    throw new libVES.Error('InvalidValue','Error generating ECIES ephemeral',{error: e});
 		});
 	    });
+	    return this.wasm().then(function(wasm) {
+		var k = wasm.init(pub.curve);
+		wasm.generate(k);
+		return wasm.privpub(k);
+	    });
 	},
-	cipher: function(priv,pub) {
+	derive: function(priv, pub) {
+	    if (pub instanceof CryptoKey) return Promise.resolve(libVES.Algo.ECDH.curveBytes[pub.algorithm.namedCurve] || crypto.subtle.exportKey('jwk', pub).then(function(jwk) {
+		return jwk.x.length * 3 / 4;
+	    })).then(function(len) {
+		return crypto.subtle.deriveBits({name: 'ECDH', public: pub}, priv, 8 * len);
+	    });
+	    return this.wasm().then(function(wasm) {
+		return wasm.derive(priv, pub);
+	    });
+	},
+	cipher: function(priv, pub) {
 	    return libVES.getModule(libVES.Cipher,'AES256GCMp').then(function(m) {
-		return Promise.resolve(libVES.Algo.ECDH.curveBytes[pub.algorithm.namedCurve] || crypto.subtle.exportKey('jwk',pub).then(function(jwk) {
-		    return jwk.x.length * 3 / 4;
-		})).then(function(len) {
-		    return crypto.subtle.deriveBits({name:'ECDH',public:pub},priv,8 * len).then(function(raw) {
-			return crypto.subtle.digest({name:'SHA-384'},raw).then(function(buf) {
-			    return new m(new Uint8Array(buf).slice(0,m.prototype.keySize + m.prototype.ivSize));
-			});
+		return libVES.Algo.ECDH.derive(priv, pub).then(function(raw) {
+		    return crypto.subtle.digest({name:'SHA-384'},raw).then(function(buf) {
+			return new m(new Uint8Array(buf).slice(0,m.prototype.keySize + m.prototype.ivSize));
 		    });
 		});
 	    });
@@ -119,13 +136,22 @@ libVES.Algo = {
 		    }).then(function(der) {
 			return libVES.Util.PEM.encode(der, 'PUBLIC KEY');
 		    });
-	    }
+	    } else return this.wasm().then(function(wasm) {
+		return libVES.Util.Key.export(wasm.getpub(data), wasm.getpriv(data), libVES.Algo.ECDH.asn1hdr(wasm.getoid(data)), optns);
+	    });
 	    throw new libVES.Error('Internal', "Unknown type of key object");
 	},
 	generate: function(optns) {
-	    var op = {name:'ECDH', namedCurve:'P-384'};
+	    var op = {name: 'ECDH', namedCurve: this.defaultCurve};
 	    if (optns) for (var k in optns) op[k] = optns[k];
-	    return crypto.subtle.generateKey(op,true,['deriveKey','deriveBits']);
+	    return crypto.subtle.generateKey(op, true, ['deriveKey', 'deriveBits']).catch(function(e) {
+		console.log('ECDH generateKey failed, trying wasm...', e, op);
+		return libVES.Algo.ECDH.wasm().then(function(wasm) {
+		    var k = wasm.init(op.namedCurve);
+		    if (!k || !wasm.generate(k)) throw new libVES.Error('InvalidValue', 'WasmECDH key generation error (unsupported curve?)');
+		    return wasm.privpub(k);
+		});
+	    });
 	},
 	getPublic: function(priv) {
 	    return crypto.subtle.exportKey('jwk',priv).then(function(k) {
@@ -138,7 +164,36 @@ libVES.Algo = {
 		    y: k.y
 		},{name:'ECDH'},true,[]);
 	    });
-	}
+	},
+	getKeyOptions: function(key) {
+	    if (key instanceof CryptoKey) return crypto.subtle.exportKey('jwk', key).then(function(k) {
+		return {namedCurve: k.crv};
+	    });
+	    return {namedCurve: k.curve};
+	},
+	asn1hdr: function(oid) {
+	    return [new libVES.Util.OID(this.OID), new libVES.Util.OID(oid)];
+	},
+	wasm: function() {
+	    if (!this.wasmP) this.wasmP = (typeof(WasmECDH) == 'function' ? Promise.resolve()
+		: libVES.Util.loadWasm(WasmECDHinit.baseUrl + 'WasmECDH.js')
+	    ).then(function() {
+		return WasmECDH(WasmECDHinit);
+	    });
+	    return this.wasmP;
+	},
+	importWasm: function(curve, der) {
+	    return libVES.Algo.ECDH.wasm().then(function(wasm) {
+		return libVES.Util.Key.fromDER(der, function(pub, priv, pubBits) {
+		    var k = wasm.init(curve);
+		    if (!k) return null;
+		    if (pub) wasm.setpub(k, pub);
+		    if (priv) wasm.setpriv(k, priv);
+		    return k;
+		});
+	    });
+	},
+	OID: '1.2.840.10045.2.1'
     },
     RSA: {
 	tag: 'RSA',
@@ -197,7 +252,7 @@ libVES.Algo = {
 	    throw new libVES.Error('Internal',"Unknown type of key object");
 	},
 	generate: function(optns) {
-	    var op = {name:'RSA-OAEP', modulusLength:2048, publicExponent:new Uint8Array([1,0,1]), hash:'SHA-1'};
+	    var op = {name:'RSA-OAEP', modulusLength:4096, publicExponent:new Uint8Array([1,0,1]), hash:'SHA-256'};
 	    if (optns) for (var k in optns) op[k] = optns[k];
 	    return crypto.subtle.generateKey(op,true,['decrypt','encrypt']);
 	},
@@ -210,7 +265,12 @@ libVES.Algo = {
 		    key_ops: ['encrypt'],
 		    kty: 'RSA',
 		    n: k.n
-		},{name:'RSA-OAEP',hash:'SHA-1'},true,['encrypt']);
+		},{name:'RSA-OAEP',hash:'SHA-256'},true,['encrypt']);
+	    });
+	},
+	getKeyOptions: function(key) {
+	    return crypto.subtle.exportKey('jwk', key).then(function(k) {
+		return {modulusLength: ((k.n.length * 6) >> 3) * 8, publicExponent: libVES.Util.B64ToByteArray(k.e)};
 	    });
 	}
     },
@@ -249,7 +309,92 @@ libVES.Algo = {
 	    }
 	});
     },
+    fromKeyOptions: function(optns) {
+	if (optns.namedCurve) return 'ECDH';
+	if (optns.oqsAlgo) return 'OQS';
+	if (optns.modulusLength) return 'RSA';
+    },
     toString: function() {
 	return 'libVES.Algo';
     }
+};
+
+WasmECDHinit = {
+    Key: function() {},
+    init: function(curve) {
+        var a = new Uint8Array(libVES.Util.StringToByteArray(curve));
+        var arg1 = this.buf(a.byteLength + 1);
+        arg1.set(a);
+        arg1.set([0], a.byteLength);
+        var ptr = this._WasmECDH_new(arg1.byteOffset);
+        if (!ptr) return null;
+        var key = new this.Key();
+        key.ptr = ptr;
+        key.curve = this.getcurve(key);
+        return key;
+    },
+    buf: function(len) {
+        return new Uint8Array(this.asm.memory.buffer, this._WasmECDH_buf, len);
+    },
+    str: function(ptr) {
+        if (!ptr) return null;
+        var b = new Uint8Array(this.asm.memory.buffer, ptr);
+        return libVES.Util.ByteArrayToString(b.slice(0, b.indexOf(0)));
+    },
+    generate: function(key) {
+        key.private = true;
+        return this._WasmECDH_generate(key.ptr);
+    },
+    setpub: function(key, pub) {
+        var arg1 = this.buf(pub.byteLength);
+        arg1.set(pub);
+        return this._WasmECDH_setpub(key.ptr, arg1.byteOffset, arg1.byteLength);
+    },
+    setpriv: function(key, priv) {
+        key.private = true;
+        var arg1 = this.buf(priv.byteLength);
+        arg1.set(priv);
+        return this._WasmECDH_setpriv(key.ptr, arg1.byteOffset, arg1.byteLength);
+    },
+    getpub: function(key) {
+        var l = this._WasmECDH_getpub(key.ptr);
+        if (l <= 0) return null;
+        var rs = new Uint8Array(l);
+        rs.set(this.buf(l));
+        return rs;
+    },
+    getpriv: function(key) {
+        if (!key.private) return null;
+        var l = this._WasmECDH_getpriv(key.ptr);
+        if (l <= 0) return null;
+        var rs = new Uint8Array(l);
+        rs.set(this.buf(l));
+        return rs;
+    },
+    getcurve: function(key) {
+        return this.str(this._WasmECDH_getcurve(key.ptr));
+    },
+    getoid: function(key) {
+        return this.str(this._WasmECDH_getoid(key.ptr));
+    },
+    derive: function(priv, pub) {
+        var l = this._WasmECDH_derive(priv.ptr, pub.ptr);
+        if (l <= 0) return null;
+        var rs = new Uint8Array(l);
+        rs.set(this.buf(l));
+        return rs;
+    },
+    privpub: function(priv) {
+        var pub = new this.Key();
+        pub.ptr = priv.ptr;
+        pub.curve = priv.curve;
+        return {privateKey: priv, publicKey: pub};
+    },
+    free: function(key) {
+        this._WasmECDH_free(key.ptr);
+    },
+    locateFile: function(file) {
+	return this.baseUrl + file;
+    },
+    baseUrl: 'https://ves.host/pub/'
 };

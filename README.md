@@ -14,7 +14,7 @@
      *         \___/              - VESrecovery™
      *
      *
-     * (c) 2018 VESvault Corp
+     * (c) 2018 - 2023 VESvault Corp
      * Jim Zubov <jz@vesvault.com>
      *
      * GNU General Public License v3
@@ -27,13 +27,21 @@
      *
      ***************************************************************************/
 
-## libVES.js
+# libVES.js
 
-A JavaScript end-to-end encryption API library with [VESrecovery](https://www.vesvault.com/#vault)™: Encrypt Everything without fear of losing the Key.
+The official VESvault JavaScript library:
+* end-to-end encryption for data at-rest
+* secure item sharing
+* VESrecovery: safety from key loss without security compromises
 
-Run Makefile.pl to generate a consolidated js file, and a minified version of it.
+Also available: [libVES npm](https://www.npmjs.com/package/libves)
 
-Run Makefile.bat on Windows to generate a working build.
+## Build the JS
+* Run Makefile.pl to generate a consolidated js file, and a minified version of it.
+* Run Makefile.bat on Windows to generate a working build.
 
-API Documentation:
+## Wasm builds
+* Look for comments in WasmOQS/Makefile and WasmECDH/Makefile
+
+## API Documentation:
 https://ves.host/docs/libVES

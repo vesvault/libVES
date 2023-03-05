@@ -103,6 +103,16 @@ libVES.Util = {
 	}
 	return rs;
     },
+    loadWasm: function(src) {
+	return new Promise(function(resolve, reject) {
+	    var sc = document.createElement('script');
+	    sc.async = false;
+	    sc.src = src;
+	    sc.onload = resolve;
+	    sc.onerror = reject;
+	    document.getElementsByTagName('head')[0].appendChild(sc);
+	});
+    },
     PEM: {
 	toDER: function(pem) {
 	    var pp = pem.match(/-----BEGIN.*?-----\s*\r?\n([A-Za-z0-9\/\+\=\s\r\n]*)-----END/);
@@ -257,6 +267,43 @@ libVES.Util = {
 	    }
 	    this.value = rs.join('.');
 	} else this.value = s;
+    },
+    Key: {
+	fromDER: function(der, callbk) {
+	    var asn = libVES.Util.ASN1.decode(der)[0];
+	    if (typeof(asn[0]) == 'number') {
+		var asn2 = libVES.Util.ASN1.decode(asn[2])[0];
+		var pub = libVES.Util.ASN1.decode(asn2[2]);
+		console.log('pub', pub);
+		if (pub) return callbk(pub[0].slice(1), asn2[1], pub[0][0]);
+		else callbk(null, asn2[1]);
+	    } else return callbk(asn[1].slice(1), null, asn[1][0]);
+	},
+	pubASN1: function(pub, optns) {
+	    var p = new Uint8Array(pub.byteLength + 1);
+	    p[0] = optns && optns.pubBits ? optns.pubBits : 0;
+	    p.set(new Uint8Array(pub), 1);
+	    p.ASN1type = 3;
+	    return p;
+	},
+	toPKCS: function(pub, priv, asn1hdr, optns) {
+	    if (priv) {
+		var seq = [1, priv];
+		if (pub) {
+		    p = libVES.Util.ASN1.encode([libVES.Util.Key.pubASN1(pub, optns)]);
+		    p.ASN1type = 0xa1;
+		    seq.push(p);
+		}
+		var buf = libVES.Util.ASN1.encode([seq]);
+		return libVES.Util.ASN1.encode([[0, asn1hdr, buf]]);
+	    }
+	    return libVES.Util.ASN1.encode([[asn1hdr, libVES.Util.Key.pubASN1(pub, optns)]]);
+	},
+	export: function(pub, priv, asn1hdr, optns) {
+	    var pkcs = libVES.Util.Key.toPKCS(pub, priv, asn1hdr, optns);
+	    if (priv) return libVES.Util.PKCS8.encode8(pkcs, optns);
+	    return libVES.Util.PEM.encode(pkcs, 'PUBLIC KEY');
+	}
     },
     PKCS1: {
 	import: function(args,chain,optns) {
@@ -440,13 +487,18 @@ libVES.Util = {
     EC: {
 	import: function(args,chain,optns) {
 	    return chain('container',optns).then(function(der) {
-		var a = {name:'ECDH',namedCurve:libVES.Util.EC.namedCurves[String(args)]};
-		return crypto.subtle.importKey('spki',der,a,true,[]).catch(function() {;
-		    return crypto.subtle.importKey('pkcs8',der,a,true,['deriveKey','deriveBits']).catch(function(e) {
-		        console.log('PKCS8 failed, trying JWK...');
-			var jwk = libVES.Util.PKCS8.toJWK(der);
-			return crypto.subtle.importKey('jwk', jwk, a, true, jwk.key_ops);
-		    });
+		var oid = String(args);
+		var curve = libVES.Util.EC.namedCurves[oid] || oid;
+		var a = {name:'ECDH',namedCurve: curve};
+		return crypto.subtle.importKey('spki',der,a,true,[]).catch(function() {
+		    return crypto.subtle.importKey('pkcs8',der,a,true,['deriveKey','deriveBits']);
+		}).catch(function(e) {
+		    console.log('PKCS8 failed, trying JWK...');
+		    var jwk = libVES.Util.PKCS8.toJWK(der);
+		    return crypto.subtle.importKey('jwk', jwk, a, true, jwk.key_ops);
+		}).catch(function(e) {
+		    console.log('trying WasmECDH...');
+		    return libVES.Algo.ECDH.importWasm(curve, der);
 		});
 	    });
 	},
