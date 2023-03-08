@@ -39,6 +39,9 @@ libVES.Algo.OQS = {
 	});
 	return this.wasmP;
     },
+    checkLimits: function(k) {
+	return k.pub.byteLength + k.priv.byteLength <= libVES.maxKeyLen && k.ctextlen + 64 <= libVES.maxEncDataLen;
+    },
     decrypt: function(k,buf) {
 	return this.wasm().then(function(wasm) {
 	    var b = new Uint8Array(buf);
@@ -94,7 +97,8 @@ libVES.Algo.OQS = {
 	return this.wasm().then(function(wasm) {
 	    var k = wasm.init(algo, true);
 	    if (!k) throw new libVES.Error('InvalidValue', 'OQS key init failed');
-	    if (!wasm.generate(k)) throw new libVES.Error('Internal', 'OQS generate failed');
+	    if (!this.checkLimits(k)) throw wasm.free(k), new libVES.Error('Internal', 'OQS key is too large for VES');
+	    if (!wasm.generate(k)) throw wasm.free(k), new libVES.Error('Internal', 'OQS generate failed');
 	    var pub = new wasm.Key(k.algo);
 	    for (var i in k) if (i != 'priv') pub[i] = k[i];
 	    return {privateKey: k, publicKey: pub};
@@ -102,6 +106,19 @@ libVES.Algo.OQS = {
     },
     getKeyOptions: function(key) {
 	return {oqsAlgo: k.algo};
+    },
+    getMethods: function() {
+	return this.wasm().then(function(wasm) {
+	    return wasm.getalgos().filter(function(algo) {
+		var k = wasm.init(algo, true);
+		if (!k) return false;
+		var f = libVES.Algo.OQS.checkLimits(k);
+		wasm.free(k);
+		return f;
+	    }).map(function(algo) {
+		return {oqsAlgo: algo};
+	    });
+	});
     },
     Util: {
 	import: function(args,chain,optns) {
@@ -112,7 +129,7 @@ libVES.Algo.OQS = {
 			var k = wasm.init(algo, !!priv);
 			if (!k) throw new libVES.Error('InvalidValue', 'OQS key init failed (bad algo?)');
 			var s = function(dst, src) {
-			    if (!dst || !src || dst.byteLength != src.byteLength) throw new libVES.Error('InvalidValue', 'Incorrect OQS key size');
+			    if (!dst || !src || dst.byteLength != src.byteLength) throw wasm.free(k), new libVES.Error('InvalidValue', 'Incorrect OQS key size');
 			    dst.set(src, 0);
 			};
 			if (priv) s(k.priv, priv);
@@ -126,62 +143,76 @@ libVES.Algo.OQS = {
     OID: '1.3.6.1.4.1.53675.3.5',
     defaultAlgo: 'Kyber768'
 };
+libVES.Algo.all.push('OQS');
 
 var WasmOQSinit = {
     Key: function(algo) {
 	this.algo = algo;
     },
     init: function(algo, fpriv) {
-        var a = new Uint8Array(libVES.Util.StringToByteArray(algo));
-        var arg1 = new Uint8Array(this.asm.memory.buffer, 16, 48);
-        arg1.set(a);
-        arg1.set([0], a.byteLength);
-        var ptr = this._WasmOQS_new(arg1.byteOffset, fpriv);
-        if (!ptr) return null;
-        var key = new this.Key(algo);
-        key.ptr = ptr;
-        var priv = this._WasmOQS_priv(ptr);
-        if (priv) key.priv = new Uint8Array(this.asm.memory.buffer, priv, this._WasmOQS_privlen(ptr));
-        key.pub = new Uint8Array(this.asm.memory.buffer, this._WasmOQS_pub(ptr), this._WasmOQS_publen(ptr));
-        key.secretlen = this._WasmOQS_decaps(key.ptr, null, null);
-        key.ctextlen = this._WasmOQS_encaps(key.ptr, null, null);
-        return key;
+	var a = new Uint8Array(libVES.Util.StringToByteArray(algo));
+	var arg1 = new Uint8Array(this.asm.memory.buffer, 16, 48);
+	arg1.set(a);
+	arg1.set([0], a.byteLength);
+	var ptr = this._WasmOQS_new(arg1.byteOffset, fpriv);
+	if (!ptr) return null;
+	var key = new this.Key(algo);
+	key.ptr = ptr;
+	var priv = this._WasmOQS_priv(ptr);
+	if (priv) key.priv = new Uint8Array(this.asm.memory.buffer, priv, this._WasmOQS_privlen(ptr));
+	key.pub = new Uint8Array(this.asm.memory.buffer, this._WasmOQS_pub(ptr), this._WasmOQS_publen(ptr));
+	key.secretlen = this._WasmOQS_decaps(key.ptr, null, null);
+	key.ctextlen = this._WasmOQS_encaps(key.ptr, null, null);
+	return key;
     },
     generate: function(key) {
-        return this._WasmOQS_generate(key.ptr) >= 0;
+	return this._WasmOQS_generate(key.ptr) >= 0;
     },
     encaps: function(key) {
-        var arg1 = new Uint8Array(this.asm.memory.buffer, this._WasmOQS_secretbuf, this._WasmOQS_decaps(key.ptr, null, null));
-        var arg2 = new Uint8Array(this.asm.memory.buffer, this._WasmOQS_ctextbuf, this._WasmOQS_encaps(key.ptr, null, null));
-        if (this._WasmOQS_encaps(key.ptr, arg2.byteOffset, arg1.byteOffset) <= 0) return null;
-        key.secret = new Uint8Array(arg1.byteLength);
-        key.secret.set(arg1);
-        var ctext = new Uint8Array(arg2.byteLength);
-        ctext.set(arg2);
-        return ctext;
+	var arg1 = new Uint8Array(this.asm.memory.buffer, this._WasmOQS_secretbuf, this._WasmOQS_decaps(key.ptr, null, null));
+	var arg2 = new Uint8Array(this.asm.memory.buffer, this._WasmOQS_ctextbuf, this._WasmOQS_encaps(key.ptr, null, null));
+	if (this._WasmOQS_encaps(key.ptr, arg2.byteOffset, arg1.byteOffset) <= 0) return null;
+	key.secret = new Uint8Array(arg1.byteLength);
+	key.secret.set(arg1);
+	var ctext = new Uint8Array(arg2.byteLength);
+	ctext.set(arg2);
+	return ctext;
     },
     decaps: function(key, ctext) {
-        if (!ctext) return key.secret;
-        if (ctext.byteLength != this._WasmOQS_encaps(key.ptr, null, null)) return null;
-        var arg1 = new Uint8Array(this.asm.memory.buffer, this._WasmOQS_secretbuf, this._WasmOQS_decaps(key.ptr, null, null));
-        var arg2 = new Uint8Array(this.asm.memory.buffer, this._WasmOQS_ctextbuf, ctext.byteLength);
-        arg2.set(ctext);
-        if (this._WasmOQS_decaps(key.ptr, arg1.byteOffset, arg2.byteOffset) <= 0) return null;
-        key.secret = new Uint8Array(arg1.byteLength);
-        key.secret.set(arg1);
-        return key.secret;
+	var arg1 = new Uint8Array(this.asm.memory.buffer, this._WasmOQS_secretbuf, this._WasmOQS_decaps(key.ptr, null, null));
+	if (ctext) {
+	    if (ctext.byteLength != this._WasmOQS_encaps(key.ptr, null, null)) return null;
+	    var arg2 = new Uint8Array(this.asm.memory.buffer, this._WasmOQS_ctextbuf, ctext.byteLength);
+	    arg2.set(ctext);
+	    if (this._WasmOQS_decaps(key.ptr, arg1.byteOffset, arg2.byteOffset) <= 0) return null;
+	}
+	var secret = new Uint8Array(arg1.byteLength);
+	secret.set(arg1);
+	return secret;
     },
     free: function(key) {
-        this._WasmOQS_free(key.ptr);
+	this._WasmOQS_free(key.ptr);
+	delete(key.ptr);
+    },
+    getalgos: function() {
+	var algos = [];
+	var a;
+	for (var i = 0; a = this._WasmOQS_enumalgo(i); i++) {
+	    var s = new Uint8Array(this.asm.memory.buffer, a);
+	    var p = s.indexOf(0);
+	    if (!p) continue;
+	    algos.push(libVES.Util.ByteArrayToString(s.slice(0, p)));
+	}
+	return algos;
     },
     test: function(algo) {
-        var k = this.init(algo, 1);
-        this.generate(k);
-        console.log(k);
-        var ctext = this.encaps(k);
-        console.log(k.secret, ctext);
-        var secret = this.decaps(k);
-        console.log(secret);
+	var k = this.init(algo, 1);
+	this.generate(k);
+	var ctext = this.encaps(k);
+	var secret = this.decaps(k);
+	console.log(secret);
+	var secret2 = this.decaps(k, ctext);
+	console.log(secret2);
     },
     locateFile: function(file) {
 	return this.baseUrl + file;

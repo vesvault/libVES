@@ -50,7 +50,6 @@ libVES.prototype = {
     keyOptions: {namedCurve: 'P-521'},
     textCipher: 'AES256GCMp',
     defaultHash: 'SHA256',
-    
     request: function(method,uri,body,optns) {
 	if (!optns) optns = {};
 	return new Promise(function(resolve,reject) {
@@ -908,5 +907,8 @@ libVES.getModuleFunc = function(sectn,mod,then) {
 libVES.loadModule = function(sectn,mod) {
     return Promise.reject(new libVES.Error('Internal',"Cannot load " + sectn + '.' + mod));
 };
+libVES.maxKeyLen = 48896;
+libVES.maxEncDataLen = 32768;
+
 
 if (!libVES.Domain) libVES.Domain = {};

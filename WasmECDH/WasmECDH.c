@@ -17,6 +17,11 @@ const struct {
     { 0, NULL }
 };
 
+struct WasmECDH_curvelist {
+    unsigned int ct;
+    WOLFSSL_EC_BUILTIN_CURVE curves[0];
+};
+
 EMSCRIPTEN_KEEPALIVE unsigned char WasmECDH_buf[1024];
 
 EMSCRIPTEN_KEEPALIVE WOLFSSL_EC_KEY *WasmECDH_new(const char *curve) {
@@ -80,5 +85,21 @@ EMSCRIPTEN_KEEPALIVE int WasmECDH_derive(WOLFSSL_EC_KEY *priv, WOLFSSL_EC_KEY *p
 
 EMSCRIPTEN_KEEPALIVE void WasmECDH_free(WOLFSSL_EC_KEY *key) {
     if (key) wolfSSL_EC_KEY_free(key);
+}
+
+EMSCRIPTEN_KEEPALIVE struct WasmECDH_curvelist *WasmECDH_listinit(int ct) {
+    struct WasmECDH_curvelist *lst = malloc(sizeof(struct WasmECDH_curvelist) + ct * sizeof(lst->curves[0]));
+    lst->ct = wolfSSL_EC_get_builtin_curves(lst->curves, ct);
+    return realloc(lst, sizeof(struct WasmECDH_curvelist) + lst->ct * sizeof(lst->curves[0]));
+}
+
+EMSCRIPTEN_KEEPALIVE const char *WasmECDH_listget(struct WasmECDH_curvelist *lst, unsigned int idx) {
+    if (idx >= lst->ct) return NULL;
+    const char *crv = wolfSSL_OBJ_nid2ln(lst->curves[idx].nid);
+    return crv ? crv : "";
+}
+
+EMSCRIPTEN_KEEPALIVE void WasmECDH_listfree(struct WasmECDH_curvelist *lst) {
+    free(lst);
 }
 

@@ -1,3 +1,34 @@
+/***************************************************************************
+ *          ___       ___
+ *         /   \     /   \    VESvault
+ *         \__ /     \ __/    Encrypt Everything without fear of losing the Key
+ *            \\     //                   https://vesvault.com https://ves.host
+ *             \\   //
+ *     ___      \\_//
+ *    /   \     /   \         libVES:                      VESvault API library
+ *    \__ /     \ __/
+ *       \\     //
+ *        \\   //
+ *         \\_//              - Key Management and Exchange
+ *         /   \              - Item Encryption and Sharing
+ *         \___/              - VESrecovery (TM)
+ *
+ *
+ * (c) 2018 VESvault Corp
+ * Jim Zubov <jz@vesvault.com>
+ *
+ * GNU General Public License v3
+ * You may opt to use, copy, modify, merge, publish, distribute and/or sell
+ * copies of the Software, and permit persons to whom the Software is
+ * furnished to do so, under the terms of the COPYING file.
+ *
+ * This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
+ * KIND, either express or implied.
+ *
+ * WasmOQS.c               libVES: An interface to libOQS post-quantum suite
+ *
+ ***************************************************************************/
+
 #include <emscripten.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -70,3 +101,13 @@ EMSCRIPTEN_KEEPALIVE void WasmOQS_free(struct WasmOQS *oqs) {
     OQS_KEM_free(oqs->kem);
     free(oqs);
 }
+
+EMSCRIPTEN_KEEPALIVE const char *WasmOQS_enumalgo(int idx) {
+    const char *algo = OQS_KEM_alg_identifier(idx);
+    if (!algo) return NULL;
+    if (OQS_KEM_alg_is_enabled(algo)) {
+	return algo;
+    }
+    return "";
+}
+

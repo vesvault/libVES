@@ -193,6 +193,18 @@ libVES.Algo = {
 		});
 	    });
 	},
+	getMethods: function() {
+	    var crvs = ['P-256', 'P-384', 'P-521'];
+	    return this.wasm().then(function(wasm) {
+		return crvs.concat(wasm.getcurves());
+	    }).catch(function(e) {
+		return crvs;
+	    }).then(function(crvs) {
+		return crvs.map(function(algo) {
+		    return {namedCurve: algo};
+		});
+	    });
+	},
 	OID: '1.2.840.10045.2.1'
     },
     RSA: {
@@ -272,7 +284,18 @@ libVES.Algo = {
 	    return crypto.subtle.exportKey('jwk', key).then(function(k) {
 		return {modulusLength: ((k.n.length * 6) >> 3) * 8, publicExponent: libVES.Util.B64ToByteArray(k.e)};
 	    });
-	}
+	},
+	getMethods: function() {
+	    var bits = [];
+	    var s = 128;
+	    for (var i = 640; i <= 16384; i += s) {
+		bits.push(i);
+		if (i / s >= 8) s <<= 1;
+	    }
+	    return Promise.resolve(bits.map(function(b) {
+		    return {modulusLength: b};
+	    }));
+	},
     },
     RSA_PKCS1_15: {
 	tag: 'RSA_PKCS1_15',
@@ -316,85 +339,98 @@ libVES.Algo = {
     },
     toString: function() {
 	return 'libVES.Algo';
-    }
+    },
+    all: ['RSA', 'ECDH']
 };
 
 WasmECDHinit = {
     Key: function() {},
     init: function(curve) {
-        var a = new Uint8Array(libVES.Util.StringToByteArray(curve));
-        var arg1 = this.buf(a.byteLength + 1);
-        arg1.set(a);
-        arg1.set([0], a.byteLength);
-        var ptr = this._WasmECDH_new(arg1.byteOffset);
-        if (!ptr) return null;
-        var key = new this.Key();
-        key.ptr = ptr;
-        key.curve = this.getcurve(key);
-        return key;
+	var a = new Uint8Array(libVES.Util.StringToByteArray(curve));
+	var arg1 = this.buf(a.byteLength + 1);
+	arg1.set(a);
+	arg1.set([0], a.byteLength);
+	var ptr = this._WasmECDH_new(arg1.byteOffset);
+	if (!ptr) return null;
+	var key = new this.Key();
+	key.ptr = ptr;
+	key.curve = this.getcurve(key);
+	return key;
     },
     buf: function(len) {
-        return new Uint8Array(this.asm.memory.buffer, this._WasmECDH_buf, len);
+	return new Uint8Array(this.asm.memory.buffer, this._WasmECDH_buf, len);
     },
     str: function(ptr) {
-        if (!ptr) return null;
-        var b = new Uint8Array(this.asm.memory.buffer, ptr);
-        return libVES.Util.ByteArrayToString(b.slice(0, b.indexOf(0)));
+	if (!ptr) return null;
+	var b = new Uint8Array(this.asm.memory.buffer, ptr);
+	return libVES.Util.ByteArrayToString(b.slice(0, b.indexOf(0)));
     },
     generate: function(key) {
-        key.private = true;
-        return this._WasmECDH_generate(key.ptr);
+	key.private = true;
+	return this._WasmECDH_generate(key.ptr);
     },
     setpub: function(key, pub) {
-        var arg1 = this.buf(pub.byteLength);
-        arg1.set(pub);
-        return this._WasmECDH_setpub(key.ptr, arg1.byteOffset, arg1.byteLength);
+	var arg1 = this.buf(pub.byteLength);
+	arg1.set(pub);
+	return this._WasmECDH_setpub(key.ptr, arg1.byteOffset, arg1.byteLength);
     },
     setpriv: function(key, priv) {
-        key.private = true;
-        var arg1 = this.buf(priv.byteLength);
-        arg1.set(priv);
-        return this._WasmECDH_setpriv(key.ptr, arg1.byteOffset, arg1.byteLength);
+	key.private = true;
+	var arg1 = this.buf(priv.byteLength);
+	arg1.set(priv);
+	return this._WasmECDH_setpriv(key.ptr, arg1.byteOffset, arg1.byteLength);
     },
     getpub: function(key) {
-        var l = this._WasmECDH_getpub(key.ptr);
-        if (l <= 0) return null;
-        var rs = new Uint8Array(l);
-        rs.set(this.buf(l));
-        return rs;
+	var l = this._WasmECDH_getpub(key.ptr);
+	if (l <= 0) return null;
+	var rs = new Uint8Array(l);
+	rs.set(this.buf(l));
+	return rs;
     },
     getpriv: function(key) {
-        if (!key.private) return null;
-        var l = this._WasmECDH_getpriv(key.ptr);
-        if (l <= 0) return null;
-        var rs = new Uint8Array(l);
-        rs.set(this.buf(l));
-        return rs;
+	if (!key.private) return null;
+	var l = this._WasmECDH_getpriv(key.ptr);
+	if (l <= 0) return null;
+	var rs = new Uint8Array(l);
+	rs.set(this.buf(l));
+	return rs;
     },
     getcurve: function(key) {
-        return this.str(this._WasmECDH_getcurve(key.ptr));
+	return this.str(this._WasmECDH_getcurve(key.ptr));
     },
     getoid: function(key) {
-        return this.str(this._WasmECDH_getoid(key.ptr));
+	return this.str(this._WasmECDH_getoid(key.ptr));
     },
     derive: function(priv, pub) {
-        var l = this._WasmECDH_derive(priv.ptr, pub.ptr);
-        if (l <= 0) return null;
-        var rs = new Uint8Array(l);
-        rs.set(this.buf(l));
-        return rs;
+	var l = this._WasmECDH_derive(priv.ptr, pub.ptr);
+	if (l <= 0) return null;
+	var rs = new Uint8Array(l);
+	rs.set(this.buf(l));
+	return rs;
     },
     privpub: function(priv) {
-        var pub = new this.Key();
-        pub.ptr = priv.ptr;
-        pub.curve = priv.curve;
-        return {privateKey: priv, publicKey: pub};
+	var pub = new this.Key();
+	pub.ptr = priv.ptr;
+	pub.curve = priv.curve;
+	return {privateKey: priv, publicKey: pub};
     },
     free: function(key) {
-        this._WasmECDH_free(key.ptr);
+	this._WasmECDH_free(key.ptr);
+    },
+    getcurves: function() {
+	var lst = this._WasmECDH_listinit(1024);
+	var crvs = [];
+	var c;
+	for (var i = 0; (c = this._WasmECDH_listget(lst, i)); i++) {
+	    var crv = this.str(c);
+	    if (crv == '') continue;
+	    crvs.push(crv);
+	}
+	this._WasmECDH_listfree(lst);
+	return crvs;
     },
     locateFile: function(file) {
-	return this.baseUrl + file;
+       return this.baseUrl + file;
     },
     baseUrl: 'https://ves.host/pub/'
 };

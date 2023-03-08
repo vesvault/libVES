@@ -1,58 +1,89 @@
-#wasm dir
+#/***************************************************************************
+# *          ___       ___
+# *         /   \     /   \    VESvault
+# *         \__ /     \ __/    Encrypt Everything without fear of losing the Key
+# *            \\     //                   https://vesvault.com https://ves.host
+# *             \\   //
+# *     ___      \\_//
+# *    /   \     /   \         libVES:                      VESvault API library
+# *    \__ /     \ __/
+# *       \\     //
+# *        \\   //
+# *         \\_//              - Key Management and Exchange
+# *         /   \              - Item Encryption and Sharing
+# *         \___/              - VESrecovery (TM)
+# *
+# *
+# * (c) 2018 - 2023 VESvault Corp
+# * Jim Zubov <jz@vesvault.com>
+# *
+# * GNU General Public License v3
+# * You may opt to use, copy, modify, merge, publish, distribute and/or sell
+# * copies of the Software, and permit persons to whom the Software is
+# * furnished to do so, under the terms of the COPYING file.
+# *
+# * This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
+# * KIND, either express or implied.
+# *
+# ***************************************************************************/
+
+
+# This makefile has to be invoked with emscripten:
+# > emmake make
+
+
+# Path to the source directory
 ROOT=$(shell pwd)
 
-# WolfSSL source path
+
+# Path to the wolfssl source code
+# https://github.com/open-quantum-safe/liboqs
+# The wolfssl project has to be EITHER built with emscripten prior to
+# invoking this makefile, OR the partial build below will be invoked.
+# In the latter case, set LIBWOLF to the traget path for libwolfssl.a
 WOLF=/usr/src/wolfssl
-
-#emcc, local cmd or docker
-EMCC=docker run --rm -v $(ROOT):$(ROOT) -v $(WOLF):$(WOLF) emscripten/emsdk emcc
-
-LDFLAGS=-L. -sMODULARIZE -s EXPORT_NAME="'WasmECDH'" -sERROR_ON_UNDEFINED_SYMBOLS=0 
-EMOBJS=$(ROOT)/WasmECDH.emo
-WOLFLIBS=$(WOLF)/ec.ema
-TARGET=$(ROOT)/WasmECDH.js
-EMAR=emar
-CFLAGS=-I$(ROOT)/include -I$(WOLF) \
-    -DWOLFSSL_SMALL_STACK \
-    -DOPENSSL_EXTRA \
-    -DHAVE_ECC \
-    -DHAVE_ECC_DHE \
-    -DHAVE_ALL_CURVES \
-    -DWOLFSSL_CUSTOM_CURVES \
-    -DHAVE_ECC_SECPR2 \
-    -DHAVE_ECC_SECPR3 \
-    -DHAVE_ECC_KOBLITZ \
-    -DHAVE_ECC_BRAINPOOL \
-    -DHAVE_COMP_KEY \
-    -DWC_NO_HARDEN \
-    -DWOLFSSL_MIN_ECC_BITS=32 \
-    -DWOLFSSL_CERT_EXT
-
-WOLFOBJS=$(WOLF)/src/ssl.emo \
-    $(WOLF)/wolfcrypt/src/ecc.emo \
-    $(WOLF)/wolfcrypt/src/memory.emo \
-    $(WOLF)/wolfcrypt/src/sp_int.emo \
-    $(WOLF)/wolfcrypt/src/wc_port.emo \
-    $(WOLF)/wolfcrypt/src/random.emo \
-    $(WOLF)/wolfcrypt/src/wolfmath.emo \
-    $(WOLF)/wolfcrypt/src/sha256.emo \
-    $(WOLF)/wolfcrypt/src/logging.emo \
-    $(WOLF)/wolfcrypt/src/asn.emo \
+LIBWOLF=$(WOLF)/src/.libs
 
 
+# WolfSSL partial build settings.
+# Note - the set of files and options MAY change in future WolfSSL
+# versions.
+WOLFLIBS=$(LIBWOLF)/libwolfssl.a
+WOLFOBJS=$(WOLF)/src/ssl.o \
+    $(WOLF)/wolfcrypt/src/ecc.o \
+    $(WOLF)/wolfcrypt/src/memory.o \
+    $(WOLF)/wolfcrypt/src/sp_int.o \
+    $(WOLF)/wolfcrypt/src/wc_port.o \
+    $(WOLF)/wolfcrypt/src/random.o \
+    $(WOLF)/wolfcrypt/src/wolfmath.o \
+    $(WOLF)/wolfcrypt/src/sha256.o \
+    $(WOLF)/wolfcrypt/src/logging.o \
+    $(WOLF)/wolfcrypt/src/asn.o
+
+
+# Wasm build options
+WASMMOD=WasmECDH
+LDFLAGS=-L$(LIBWOLF) -lwolfssl -sMODULARIZE -s EXPORT_NAME="'$(WASMMOD)'"
+CFLAGS=-I$(ROOT)/include -I$(WOLF) -include $(ROOT)/include/wolf_wasm.h
+EMOBJS=$(ROOT)/WasmECDH.o
+TARGET=$(ROOT)/$(WASMMOD)
 
 
 all:	$(EMOBJS) $(WOLFLIBS)
-	$(EMCC) $(LDFLAGS) -o $(TARGET) $(EMOBJS) $(WOLFLIBS)
-
-$(WOLF)/ec.ema:	$(WOLFOBJS)
-	$(EMAR) cru $@ $(WOLFOBJS)
-
-$(ROOT)/%.emo:	$(ROOT)/%.c
-	$(EMCC) $(CFLAGS) -c -o $@ $<
-
-$(WOLF)/%.emo:	$(WOLF)/%.c
-	$(EMCC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(LDFLAGS) -o $(TARGET).js $(EMOBJS)
 
 clean:
-	rm -f $(EMOBJS) $(WOLFOBJS) $(WOLFLIBS)
+	rm -f $(EMOBJS) $(TARGET).js $(TARGET).wasm
+
+
+# WolfSSL partial build targets:
+
+$(WOLFLIBS):	$(WOLFOBJS)
+	mkdir $(LIBWOLF) || true
+	$(AR) cru $@ $(WOLFOBJS)
+
+$(WOLF)/%.o:	$(WOLF)/%.c
+	$(CC) $(CFLAGS) $(WOLFCFLAGS) -c -o $@ $<
+
+clean-wolf:
+	rm -f $(WOLFOBJS) $(WOLFLIBS)

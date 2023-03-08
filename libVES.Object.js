@@ -389,12 +389,7 @@ libVES.VaultKey.prototype = new libVES.Object({
 	});
     },
     generate: function(veskey,optns) {
-	if (this.VES.keyOptions) {
-	    var o = optns;
-	    optns = {};
-	    for (var k in this.VES.keyOptions) optns[k] = this.VES.keyOptions[k];
-	    if (o) for (var k in o) optns[k] = o[k];
-	}
+	if (!optns) optns = this.VES.keyOptions;
 	var self = this;
 	var a;
 	var wc = optns && optns.privateKey ? libVES.Algo.acquire(optns.privateKey).then(function(wc) {
