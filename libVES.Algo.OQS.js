@@ -97,7 +97,7 @@ libVES.Algo.OQS = {
 	return this.wasm().then(function(wasm) {
 	    var k = wasm.init(algo, true);
 	    if (!k) throw new libVES.Error('InvalidValue', 'OQS key init failed');
-	    if (!this.checkLimits(k)) throw wasm.free(k), new libVES.Error('Internal', 'OQS key is too large for VES');
+	    if (!libVES.Algo.OQS.checkLimits(k)) throw wasm.free(k), new libVES.Error('Internal', 'OQS key is too large for VES');
 	    if (!wasm.generate(k)) throw wasm.free(k), new libVES.Error('Internal', 'OQS generate failed');
 	    var pub = new wasm.Key(k.algo);
 	    for (var i in k) if (i != 'priv') pub[i] = k[i];

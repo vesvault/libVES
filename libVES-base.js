@@ -290,9 +290,10 @@ libVES.prototype = {
 		    for (var i = 0; i < ves.length; i++) {
 			var viid = ves[i].vaultItem.id;
 			if (!vis[viid]) {
-			    ves[i].vaultItem.file ||= undefined;
-			    ves[i].vaultItem.vaultKey ||= undefined;
-			    var vi = vis[viid] = self.getItem(ves[i].vaultItem);
+			    var vi = ves[i].vaultItem;
+			    if (!vi.file) vi.file = undefined;
+			    if (!vi.vaultKey) vi.vaultKey = undefined;
+			    vi = vis[viid] = self.getItem(vi);
 			    vlst.push(vi);
 			    vi.vaultEntryByKey[kid] = ves[i];
 			}
