@@ -679,7 +679,8 @@ libVES.VaultItem.prototype = new libVES.Object({
 		});
 	    });
 	}).then(function() {
-	    if (save || save === undefined) return self.post().then(function() {
+	    if (save || save === undefined) return self.post(undefined, undefined, ((save instanceof Object) ? save : undefined)).then(function() {
+		delete(self.vaultEntries);
 		return self;
 	    });
 	    return self;

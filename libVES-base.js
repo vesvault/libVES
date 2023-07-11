@@ -45,16 +45,18 @@ if (typeof(libVES) != 'function') function libVES(optns) {
 
 libVES.prototype = {
     apiUrl: 'https://api.ves.host/v1/',
+    pollUrl: 'https://poll.ves.host/v1/',
     wwwUrl: 'https://www.vesvault.com/',
     keyAlgo: 'ECDH',
     keyOptions: {namedCurve: 'P-521'},
     textCipher: 'AES256GCMp',
     defaultHash: 'SHA256',
+    propagators: [],
     request: function(method,uri,body,optns) {
 	if (!optns) optns = {};
 	return new Promise(function(resolve,reject) {
 	    var xhr = new XMLHttpRequest();
-	    xhr.open(method,this.apiUrl + uri);
+	    xhr.open(method, (uri.match(/^https\:/) ? uri : this.apiUrl + uri));
 	    if (optns.abortFn) optns.abortFn(function() {
 		return xhr.abort();
 	    });
@@ -426,7 +428,9 @@ libVES.prototype = {
 		    return [self.me(), self.getVaultKey(), usr];
 		}).catch(function(e) {
 		    if (e.code != 'NotFound') throw e;
-		    return self.type == 'secondary' ? [self.me(), self.getVaultKey()] : [self.me()];
+		    var sh = self.type == 'secondary' ? [self.me(), self.getVaultKey()] : [self.me()];
+		    if (self.propagators) for (var i = 0; i < self.propagators.length; i++) sh.push(self.propagators[i]);
+		    return sh;
 		}).then(function(sh) {
 		    return Promise.all(sh);
 		}).then(function(sh) {
@@ -850,9 +854,11 @@ libVES.prototype = {
 					return vkey.rekey(optns);
 				    });
 				    else return vkey.getVaultItems().then(function(vis) {
-					return Promise.all(vis.map(function(vi, i) {
-					    return vi.reshareWith([user]);
-					}));
+					return self.elevateAuth().then(function(optns) {
+					    return Promise.all(vis.map(function(vi, i) {
+						return vi.reshareWith([user], undefined, optns);
+					    }));
+					});
 				    });
 				});
 			    });

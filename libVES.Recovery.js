@@ -173,10 +173,14 @@ libVES.Recovery.prototype = {
 	return this.getMyToken().then(function(tkn) {
 	    if (!tkn) throw new libVES.Error('InvalidValue','No assistance available');
 	    return self.vaultKey.getUser().then(function(user) {
-		return tkn.vaultItem.shareWith(assist ? [tkn.user,user] : [tkn.user]).then(function() {
-		    self.tokens = undefined;
-		    self.vaultKey.vaultItems = undefined;
-		    return true;
+		return self.vaultKey.VES.elevateAuth().catch(function(e) {
+		    return undefined;
+		}).then(function(optns) {
+		    return tkn.vaultItem.shareWith((assist ? [tkn.user,user] : [tkn.user]), undefined, optns).then(function() {
+			self.tokens = undefined;
+			self.vaultKey.vaultItems = undefined;
+			return true;
+		    });
 		});
 	    });
 	});
