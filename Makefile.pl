@@ -28,7 +28,7 @@
 # *
 # ***************************************************************************/
 
-@Src = ('libVES-base.js','libVES.Util.js','libVES.Math.js','libVES.Object.js','libVES.Algo.js','libVES.Cipher.js','libVES.Scramble.js','libVES.Recovery.js','libVES.Delegate.js','libVES.Flow.js', 'libVES.Auth.js', 'libVES.Algo.OQS.js');
+@Src = ('libVES-base.js','libVES.Util.js','libVES.Math.js','libVES.Object.js','libVES.Algo.js','libVES.Cipher.js','libVES.Scramble.js','libVES.Recovery.js','libVES.Delegate.js','libVES.Flow.js', 'libVES.Auth.js', 'libVES.Algo.OQS.js', 'libVES.Watch.js');
 
 open VER,'VERSION';
 chomp($Version = <VER>);
@@ -93,6 +93,7 @@ HEAD
 open(DST,">$Dst") || die "Failed to write to $Dst";
 print DST $Head;
 print DST $result;
+print DST "libVES.version = '$Version';\n";
 close(DST) || die "Failed to write to $Dst";
 
 open(DST,">$DstNode") || die "Failed to write to $DstNode";
@@ -101,6 +102,7 @@ print DST "crypto = require('crypto');\n";
 print DST "crypto.subtle = require('subtle');\n";
 print DST "XMLHttpRequest = require('xhr2');\n";
 print DST $result;
+print DST "libVES.version = '$Version';\n";
 print DST "\nmodule.exports = libVES;\n";
 close(DST) || die "Failed to write to $DstNode";
 

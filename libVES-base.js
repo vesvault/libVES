@@ -44,6 +44,7 @@ if (typeof(libVES) != 'function') function libVES(optns) {
 }
 
 libVES.prototype = {
+    constructor: libVES,
     apiUrl: 'https://api.ves.host/v1/',
     pollUrl: 'https://poll.ves.host/v1/',
     wwwUrl: 'https://www.vesvault.com/',
@@ -421,7 +422,6 @@ libVES.prototype = {
 	var key = new libVES.VaultKey({type: 'temp', algo: this.keyAlgo, user: usr}, self);
 	var veskey = this.generateVESkey(usr);
 	return key.generate(veskey, optns).then(function(k) {
-	    if (self.e2e && self.e2e.length) usr.e2e = self.getVESkeyE2E(veskey, usr);
 	    key.setField('vaultItems', veskey.then(function(v) {
 		var vi = new libVES.VaultItem({type: 'password'}, self);
 		return usr.getActiveVaultKeys().then(function() {
@@ -447,18 +447,6 @@ libVES.prototype = {
 	var buf = new Uint8Array(24);
 	crypto.getRandomValues(buf);
 	return Promise.resolve(libVES.Util.ByteArrayToB64(buf));
-    },
-    getVESkeyE2E: function(veskey,usr) {
-	var self = this;
-	return veskey.then(function(v) {
-	    return libVES.getModule(libVES.E2E,['Dialog','TempKey']).then(function(cls) {
-		return new cls({
-		    user: usr,
-		    e2e: self.e2e,
-		    tempKey: v
-		});
-	    });
-	});
     },
     setVESkey: function(veskey,lost,options) {
 	var self = this;

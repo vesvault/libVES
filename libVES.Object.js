@@ -77,6 +77,34 @@ libVES.Object.prototype = {
 	    return self[fld];
 	});
     },
+    getFields: function(fldlst, force) {
+	var self = this;
+	var flds = {};
+	for (var i = 0; i < this.fieldSets.length; i++) {
+	    for (var k in this.fieldSets[i]) if (fldlst[k]) {
+		for (var k in this.fieldSets[i]) if ((force || !this[k]) && !(flds[k] instanceof Object)) flds[k] = this.fieldSets[i][k];
+		break;
+	    }
+	}
+	for (var k in fldlst) if ((force || !this[k]) && !(flds[k] instanceof Object)) flds[k] = fldlst[k];
+	for (var k in flds) {
+	    this.loadFields(flds);
+	    break;
+	}
+	var plst = [];
+	for (var k in fldlst) {
+	    plst.push(Promise.resolve(this[k]).then(function(v) {
+		if (!(v instanceof libVES.Object)) return v;
+		return v.getFields(fldlst[k], force);
+	    }));
+	}
+	var rs = {};
+	return Promise.all(plst).then(function(lst) {
+	    var i = 0;
+	    for (var k in fldlst) rs[k] = lst[i++];
+	    return rs;
+	});
+    },
     getField: function(fld,fldlst,force) {
 	var self = this;
 	if (!this[fld] || force) {
@@ -217,6 +245,22 @@ libVES.External = function(data,VES,refs) {
 libVES.File = function(data,VES,refs) {
     this.init(data,VES,refs);
 };
+
+libVES.Event = function(data, VES, refs) {
+    this.init(data, VES, refs);
+};
+
+libVES.Session = function(data, VES, refs) {
+    this.init(data, VES, refs);
+};
+
+libVES.oldDomain = libVES.Domain;
+libVES.Domain = function(dom, VES) {
+    this.init({id: (dom ? dom : VES.domain)}, VES);
+};
+(function(old) {
+    if (old) for (var k in old) libVES.Domain[k] = old[k];
+})(libVES.oldDomain);
 
 libVES.User.prototype = new libVES.Object({
     apiUri: 'users',
@@ -815,3 +859,63 @@ libVES.External.prototype = new libVES.Object({
 	});
     }
 });
+
+
+libVES.Event.prototype = new libVES.Object({
+    apiUri: 'events',
+    fieldList: {id: true, recordedAt: true, vaultKey: true, vaultItem: true, user: true},
+    fieldClass: {vaultKey: libVES.VaultKey, vaultItem: libVES.VaultItem, user: libVES.User, creator: libVES.User, session: libVES.Session},
+    getType: function() {
+	return this.getField('type');
+    },
+    getVaultKey: function() {
+	return this.getField('vaultKey');
+    },
+    getVaultItem: function() {
+	return this.getField('vaultItem');
+    },
+    getUser: function() {
+	return this.getField('user');
+    },
+    getCreator: function() {
+	return this.getField('creator');
+    },
+    getSession: function() {
+	return this.getField('session');
+    }
+});
+
+libVES.Session.prototype = new libVES.Object({
+    apiUri: 'sessions',
+    fieldList: {id: true, createdAt: true, expiresAt: true, vaultKey: true, user: true},
+    fieldClass: {vaultKey: libVES.VaultKey, user: libVES.User},
+    getVaultKey: function() {
+	return this.getField('vaultKey');
+    },
+    getUser: function() {
+	return this.getField('user');
+    },
+    getRemote: function() {
+	return this.getField('remote');
+    },
+    getUserAgent: function() {
+	return this.getField('userAgent');
+    }
+});
+
+libVES.Domain.prototype = new libVES.Object({
+    apiUri: 'domains',
+    fieldList: {id: true},
+    fieldClass: {vaultKeys: libVES.VaultKey, vaultItems: libVES.VaultItem, creator: libVES.User},
+    fieldSets: [{vaultItems: {id: true, type: true, file: {creator: true, externals: true}, deleted: true}, vaultKeys: {id: true, type: true, user: {id: true}, algo: true, externals: {id: true}}}],
+    getCreator: function() {
+	return this.getField('creator');
+    },
+    getVaultKeys: function() {
+	return this.getField('vaultKeys');
+    },
+    getVaultItems: function() {
+	return this.getField('vaultItems');
+    }
+});
+
