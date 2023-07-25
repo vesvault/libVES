@@ -176,7 +176,7 @@ libVES.prototype = {
 		return flow.setValue(undefined).then(function() {
 		    return flow.addToken(url).then(function(url) {
 			document.location.replace(url);
-			throw {code: 'Redirect', message: 'Starting VES Authorization...'};
+			throw new libVES.Error('Redirect', 'Starting VES Authorization...');
 		    });
 		});
 	    });
@@ -352,7 +352,7 @@ libVES.prototype = {
 		    },
 		    vaultRefToUser: function(ext) {
 			var email = ext.externalId ? ext.externalId.replace(/\!.*/, '') : '';
-			if (!email.match(/\@/)) throw {code: 'NotFound', message: 'externalId is not an email for non-existing vault'};
+			if (!email.match(/\@/)) throw new libVES.Error('NotFound', 'externalId is not an email for non-existing vault');
 			return new libVES.User({email: email}, self);
 		    }
 		};
@@ -872,8 +872,13 @@ libVES.prototype = {
     }
 };
 
-libVES.Error = function(code,msg,optns) {
+libVES.Error = function(code, msg, optns) {
+    if (libVES.Error[code] && (libVES.Error[code].prototype instanceof libVES.Error)) return new (libVES.Error[code])(msg, optns);
     this.code = code;
+    this.init(msg, optns);
+};
+
+libVES.Error.prototype.init = function(msg, optns) {
     this.message = msg;
     if (optns) for (var k in optns) this[k] = optns[k];
 };
@@ -881,6 +886,32 @@ libVES.Error = function(code,msg,optns) {
 libVES.Error.prototype.toString = function() {
     return this.message || this.code;
 };
+
+libVES.Error.NotFound = function(msg, optns) {
+    this.init(msg, optns);
+};
+libVES.Error.NotFound.prototype = new libVES.Error('NotFound');
+
+libVES.Error.InvalidValue = function(msg, optns) {
+    this.init(msg, optns);
+};
+libVES.Error.InvalidValue.prototype = new libVES.Error('InvalidValue');
+
+libVES.Error.InvalidKey = function(msg, optns) {
+    this.init(msg, optns);
+};
+libVES.Error.InvalidKey.prototype = new libVES.Error('InvalidKey');
+
+libVES.Error.Redirect = function(msg, optns) {
+    this.init(msg, optns);
+};
+libVES.Error.Redirect.prototype = new libVES.Error('Redirect');
+
+libVES.Error.Internal = function(msg, optns) {
+    this.init(msg, optns);
+};
+libVES.Error.Internal.prototype = new libVES.Error('Internal');
+
 
 libVES.getModule = function(sectn,mods) {
     var mod;

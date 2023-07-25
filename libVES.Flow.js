@@ -106,7 +106,7 @@ libVES.Flow.prototype.pubJWK = function(org) {
 	    return libVES.Flow.jwkPub(jwk);
 	});
     }) : Promise.resolve(sessionStorage['VESflow|' + org]).then(function(k) {
-	if (!k) throw {code: 'NotFound', message: 'No public key stored for ' + org};
+	if (!k) throw new libVES.Error('NotFound', 'No public key stored for ' + org);
 	return JSON.parse(k);
     }));
 };
@@ -133,7 +133,7 @@ libVES.Flow.prototype.cipher = function(url) {
 libVES.Flow.prototype.encrypt = function(url, val) {
     var self = this;
     return Promise.resolve(val || this.value()).then(function(val) {
-	if (val == null) throw {code: 'NoData', message: 'Empty value'};
+	if (val == null) throw new libVES.Error('NoData', 'Empty value');
 	return self.cipher(url).then(function(ci) {
 	    var iv = new Uint8Array(12);
 	    crypto.getRandomValues(iv);
@@ -224,7 +224,7 @@ libVES.Flow.prototype.recv = function(dval) {
 	    tk = t;
 	    return true;
 	});
-	if (tk == null) throw {code: 'NotFound', message: 'No valid token in the source url'};
+	if (tk == null) throw new libVES.Error('NotFound', 'No valid token in the source url');
 	return Promise.resolve(self.source(src)).then(function() {
 	    if (dval) for (var k in dval) if (tk[k] === undefined) tk[k] = dval[k];
 	    return self.recvToken(tk);
@@ -235,7 +235,7 @@ libVES.Flow.prototype.recv = function(dval) {
 libVES.Flow.prototype.recvToken = function(tk) {
     var org = libVES.Flow.toOrigin(tk.url);
     if (org != this.origin && tk.key) sessionStorage['VESflow|' + org] = JSON.stringify(tk.key);
-    if (!tk.enc) return Promise.reject({url: tk.url, code: 'Incomplete', message: 'Missing encrypted data'});
+    if (!tk.enc) return Promise.reject(new libVES.Error('Incomplete', 'Missing encrypted data', {url: tk.url}));
     return this.decrypt(tk.enc, org);
 };
 
@@ -250,7 +250,7 @@ libVES.Flow.prototype.get = function() {
 		self.url = document.location.href;
 		return self.addToken(e.url).then(function(url) {
 		    document.location.replace(url);
-		    throw {code: 'Reload', message: 'Completing the key exchange'};
+		    throw new libVES.Error('Redirect', 'Completing the key exchange');
 		});
 	    }
 	    if (!data) throw e;
@@ -264,13 +264,13 @@ libVES.Flow.prototype.store = function(url) {
 	this.sent = 1;
 	return Promise.resolve(sessionStorage['VESflow.' + this.name + '>' + libVES.Flow.toOrigin(url)] = history.state['VESflow.' + this.name]);
     }
-    return Promise.reject({code: 'NotFound', message: 'Value is not set'});
+    return Promise.reject(new libVES.Error('NotFound', 'Value is not set'));
 };
 
 libVES.Flow.prototype.fetch = function(url) {
     var self = this;
     return Promise.resolve(sessionStorage['VESflow.' + self.name + '>' + libVES.Flow.toOrigin(url)]).then(function(ctext) {
-	if (!ctext) throw {code: 'NotFound', message: 'Not in the session storage'};
+	if (!ctext) throw new libVES.Error('NotFound', 'Not in the session storage');
 	return self.decrypt(ctext).then(function(data) {
 	    self.erase(url);
 	    return data;
