@@ -110,6 +110,10 @@ libVES.prototype = {
 	}
 	return '';
     },
+    mergeFieldList: function(flds, flds2) {
+	for (var k in flds2) if (flds[k] instanceof Object) flds[k] = self.mergeFieldList(flds[k], flds2[k]); else flds[k] = flds2[k];
+	return flds;
+    },
     elevateAuth: function(optns) {
 	var self = this;
 	if (optns && (optns.password || optns.token)) return Promise.resolve(optns);
@@ -241,8 +245,13 @@ libVES.prototype = {
 	});
     },
     lock: function() {
-	this.unlockedKeys = {};
-	return Promise.resolve(true);
+	var lock = [];
+	for (var kid in this.unlockedKeys) lock.push(this.unlockedKeys[kid].then(function(k) {
+	    return k.lock();
+	}).catch(function() {}));
+	return Promise.all(lock).then(function() {
+	    return true;
+	});
     },
     reset: function(val) {
 	this.userMe = undefined;
@@ -283,11 +292,11 @@ libVES.prototype = {
 	    });
 	});
     },
-    getItems: function() {
+    getItems: function(flds) {
 	var self = this;
 	return this.getVaultKey().then(function(k) {
 	    return k.getId().then(function(kid) {
-		return k.getVaultEntries({type: true, deleted: true, file: {creator: true, externals: true}, vaultKey: {type: true, user: true}}).then(function(ves) {
+		return k.getVaultEntries(self.mergeFieldList({type: true, deleted: true, file: {creator: true, externals: true}, vaultKey: {type: true, user: true}}, flds)).then(function(ves) {
 		    var vis = {};
 		    var vlst = [];
 		    for (var i = 0; i < ves.length; i++) {
@@ -298,6 +307,7 @@ libVES.prototype = {
 			    if (!vi.vaultKey) vi.vaultKey = undefined;
 			    vi = vis[viid] = self.getItem(vi);
 			    vlst.push(vi);
+			    if (!ves[i].vaultKey) ves[i].vaultKey = {id: kid};
 			    vi.vaultEntryByKey[kid] = ves[i];
 			}
 		    }
