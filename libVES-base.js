@@ -54,6 +54,7 @@ libVES.prototype = {
     defaultHash: 'SHA256',
     propagators: [],
     request: function(method,uri,body,optns) {
+	var self = this;
 	if (!optns) optns = {};
 	return new Promise(function(resolve,reject) {
 	    var xhr = new XMLHttpRequest();
@@ -70,8 +71,13 @@ libVES.prototype = {
 				    return new libVES.Error(e.type,e.message,e);
 				});
 				if (errs.length) {
+				    var retry = function(o) { return self.request(method, uri, body, (o || optns)); };
 				    if (optns && optns.onerror) try {
-					resolve(optns.onerror(errs));
+					resolve(optns.onerror(errs, optns, retry));
+				    } catch (e) {
+					reject(e);
+				    } else if (self.onerror) try {
+					resolve(self.onerror(errs, optns, retry));
 				    } catch (e) {
 					reject(e);
 				    }
@@ -111,7 +117,7 @@ libVES.prototype = {
 	return '';
     },
     mergeFieldList: function(flds, flds2) {
-	for (var k in flds2) if (flds[k] instanceof Object) flds[k] = self.mergeFieldList(flds[k], flds2[k]); else flds[k] = flds2[k];
+	for (var k in flds2) if (flds[k] instanceof Object) flds[k] = this.mergeFieldList(flds[k], flds2[k]); else flds[k] = flds2[k];
 	return flds;
     },
     elevateAuth: function(optns) {
