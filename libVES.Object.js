@@ -407,27 +407,56 @@ libVES.VaultKey.prototype = new libVES.Object({
 	    }
 	});
     },
+    invalidVESkey: function() {
+	var self = this;
+	return self.getVaultItems().then(function(vis) {
+            return Promise.all(vis.map(function(vi) {
+                return vi.getVaultEntries().then(function(entries) {
+                    if (entries) for (let i = 0; i < entries.length; i++) if (self.VES.unlockedKeys[entries[i].vaultKey.id]) return Promise.resolve(self.VES.unlockedKeys[entries[i].vaultKey.id]).then(function(key) {
+                        return key.getFields({user: {email: true}, extrenals: {domain: true, externalId: true}}).then(function(flds) {
+                            return vi.unshareWith([flds.externals && flds.externals[0] ? flds.externals[0] : flds.user.email]);
+                        });
+                    });
+                });
+            }));
+        });
+    },
     unlock: function(veskey) {
 	var self = this;
 	if (!self.wcPriv) self.wcPriv = self.getId().then(function(id) {
 	    return Promise.resolve(self.VES.unlockedKeys[id]).then(function(k) {
 		return k.wcPriv;
 	    }).catch(function(e) {
-		var un = self.engine().then(function(m) {
+		let un = self.engine().then(function(m) {
 		    return self.resolveVESkey(veskey).then(function(v) {
 			return self.getPrivateKey().then(function(prk) {
-			    return m.import(prk, {password: v});
+			    return m.import(prk, {password: v}).catch(function(e) {
+                                if (e && e.code == 'InvalidKey' && !veskey) {
+                                    console.log('Bad key propagated for ' + id + ', unsharing...');
+                                    return self.invalidVESkey().catch(function(e2) {
+                                        console.log(e2);
+                                    }).then(function(r) {
+                                        console.log(r);
+                                        throw e;
+                                    });
+                                }
+                                throw e;
+                            });
 			});
 		    });
 		});
-		self.VES.unlockedKeys[id] = un.then(function() {
+                let vk = self.VES.unlockedKeys[id] = un.then(function() {
 		    return self;
 		}).catch(function(e) {
-		    if (self.VES.unlockedKeys[id] == un) delete(self.VES.unlockedKeys[id]);
+		    if (self.VES.unlockedKeys[id] === vk) delete(self.VES.unlockedKeys[id]);
 		});
 		return un;
 	    });
 	});
+        else if (veskey) self.wcPriv = self.wcPriv.catch(function(e) {
+            delete(self.wcPriv);
+            return self.unlock(veskey);
+        });
 	return self.wcPriv;
     },
     lock: function() {
