@@ -753,13 +753,18 @@ libVES.VaultItem.prototype = new libVES.Object({
 		var new_ves = [];
 		var set_ves = [];
 		var valr = null;
+		var key_ids = {};
 		return Promise.all(ks.map(function(k,j) {
 		    return new_ves[j] = (old_ves[j] || (valr != null ? valr : valr = self.resolveRaw(val)).then(function(v) {
-			return k.encrypt(v).then(function(ctext) {
-			    return (function(refs) {
-				if (refs) for (var i in refs) if (refs[i] === k) return Promise.resolve({'$ref':i});
-				return k.postData(null,refs);
-			    })(libVES.Object._refs).then(function(pd) {
+			return (function(refs) {
+			    if (refs) for (var i in refs) if (refs[i] === k) return Promise.resolve({'$ref':i});
+			    return k.postData(null,refs);
+			})(libVES.Object._refs).then(function(pd) {
+			    if (pd.id) {
+				if (key_ids[pd.id]) return;
+				key_ids[pd.id] = true;
+			    }
+			    return k.encrypt(v).then(function(ctext) {
 				return set_ves.push({vaultKey: pd, encData: ctext});
 			    });
 			});
@@ -847,12 +852,17 @@ libVES.VaultItem.prototype = new libVES.Object({
 	var self = this;
 	return this.getShareVaultKeys().then(function(vaultKeys) {
 	    var uids = {};
+	    var xids = {};
 	    return Promise.all(vaultKeys.map(function(e,i) {
 		return e.getExternals().then(function(exts) {
-		    if (exts && exts.length) return exts[0];
+		    if (exts && exts.length) return exts[0].getId().then(function(xid) {
+			if (!xid || xids[xid]) return null;
+			xids[xid] = true;
+			return exts[0];
+		    });
 		    return e.getUser().then(function(u) {
 			return u.getId().then(function(uid) {
-			    if (uids[uid]) return null;
+			    if (!uid || uids[uid]) return null;
 			    uids[uid] = true;
 			    return u;
 			});
