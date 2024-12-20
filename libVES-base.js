@@ -41,6 +41,7 @@ if (typeof(libVES) != 'function') function libVES(optns) {
     else if (this.user) this.type = 'primary';
     else throw new libVES.Error('InvalidValue','Required parameters: user || domain');
     this.unlockedKeys = {};
+    this.pendingKeys = {};
 }
 
 libVES.prototype = {

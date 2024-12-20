@@ -396,7 +396,13 @@ libVES.VaultKey.prototype = new libVES.Object({
 			if (!vis.length) throw new libVES.Error('InvalidKey','Cannot unlock the secondary key');
 			return vis[0].getType().then(function(t) {
 			    switch (t) {
-				case 'password': return vis[0].get();
+				case 'password': return self.getId().then(function(kid) {
+                                    if (!self.VES.pendingKeys) self.VES.pendingKeys = {};
+                                    if (kid) self.VES.pendingKeys[kid] = true;
+                                    return vis[0].get().finally(function() {
+                                        self.VES.pendingKeys[kid] = false;
+                                    });
+                                });
 				default: return f(vis.slice(1));
 			    }
 			});
@@ -661,7 +667,7 @@ libVES.VaultItem.prototype = new libVES.Object({
 	    var fn = function() {
 		if (vaultEntries) for (; i < vaultEntries.length; i++) {
 		    var k, d;
-		    if ((d = vaultEntries[i].encData) != null && (k = vaultKeys[vaultEntries[i].vaultKey.id])) {
+		    if ((d = vaultEntries[i].encData) != null && (k = vaultKeys[vaultEntries[i].vaultKey.id]) && (!self.VES.pendingKeys || !self.VES.pendingKeys[vaultEntries[i].vaultKey.id])) {
 			i++;
 			return Promise.resolve(k).then(function(k) {
 			    return k.decrypt(d).catch(fn);
