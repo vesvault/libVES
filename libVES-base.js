@@ -92,7 +92,7 @@ libVES.prototype = {
 	    if (body != null) xhr.setRequestHeader('Content-Type','application/json');
 	    xhr.setRequestHeader('Accept','application/json');
 	    if (this.user && optns.password) xhr.setRequestHeader('Authorization','Basic ' + btoa(this.user + ':' + optns.password));
-	    else if (optns.token || this.token) xhr.setRequestHeader('Authorization','Bearer ' + (optns.token ? optns.token : this.token));
+	    else if (optns.token ?? this.token) xhr.setRequestHeader('Authorization','Bearer ' + (optns.token ? optns.token : this.token));
 	    xhr.responseType = 'json';
 	    xhr.send(body);
 	}.bind(this));
@@ -237,7 +237,7 @@ libVES.prototype = {
     unlock: function(veskey) {
 	var self = this;
 	return this.getVaultKey().then(function(vkey) {
-	    return vkey.unlock(Promise.resolve(veskey)).then(function(cryptoKey) {
+	    return vkey.unlock(veskey).then(function(cryptoKey) {
 		if (self.VESkey === null) self.VESkey = veskey;
 		if (!self.token && self.type == 'secondary') return vkey.getSessionToken().then(function(tkn) {
 		    self.token = tkn;
@@ -353,7 +353,7 @@ libVES.prototype = {
     _matchUser: function(u) {
 	if (typeof(u) == 'object') {
 	    if (u instanceof libVES.User) return u;
-	    else return new libVES.User(u,this);
+	    else return new libVES.User((u.id ? {id: u.id} : {email: u.email}), this);
 	} else if (typeof(u) == 'string' && u.match(/^\S+\@\S+$/)) return new libVES.User({email: u},this);
 	throw new libVES.Error('BadUser',"Cannot match user: " + u,{value: u});
     },
@@ -384,11 +384,14 @@ libVES.prototype = {
 	}).catch(function(e) {
 	    throw new libVES.Error('NotFound', 'Cannot match externalId for domain:' + ext.domain + ', user:' + user + '. Define libVES.Domain.' + ext.domain + '.userToVaultRef(user) to return a valid reference.',{error: e});
 	})).then(function(exts) {
-	    var vkey = new libVES.VaultKey({externals: exts, creator: self.me()},self);
+            var keyref = {externals: exts};
+            if (self.externalId && self.externalId[0] != '!') keyref.creator = self.me();
+	    var vkey = new libVES.VaultKey(keyref, self);
 	    return vkey.getId().then(function() {
 		return vkey;
 	    }).catch(function(e) {
 		if (e.code != 'NotFound') throw e;
+                if (!keyref.creator) throw new libVES.Error.InvalidKey('Anonymous vaults are not authorized to create temp keys');
 		return Promise.resolve(user || m().then(function(dom) {
 		    return dom.vaultRefToUser(exts[0]);
 		})).catch(function(e) {
@@ -441,8 +444,8 @@ libVES.prototype = {
 	return key.generate(veskey, optns).then(function(k) {
 	    key.setField('vaultItems', veskey.then(function(v) {
 		var vi = new libVES.VaultItem({type: 'password'}, self);
-		return usr.getActiveVaultKeys().then(function() {
-		    return [self.me(), self.getVaultKey(), usr];
+		return usr.getActiveVaultKeys().then(function(akeys) {
+		    return [self.me(), self.getVaultKey()].concat(akeys);
 		}).catch(function(e) {
 		    if (e.code != 'NotFound') throw e;
 		    var sh = self.type == 'secondary' ? [self.me(), self.getVaultKey()] : [self.me()];
@@ -580,6 +583,9 @@ libVES.prototype = {
 		}).catch(function(e) {
 		    if (!e || e.code != 'Unauthorized') throw e;
 		}).then(function() {
+                    self.vaultKey = k.lock().then(function() {
+                        return k;
+                    });
 		    return self.unlock(veskey);
 		});
 	    });
@@ -814,7 +820,7 @@ libVES.prototype = {
 	return self.getVaultKey().then(function(vk) {
 	    return vk.getField('unlockableVaultKeys').then(function(vks) {
 		var rs = {};
-		return Promise.all(vks.map(function(e, i) {
+		return Promise.all((vks || []).map(function(e, i) {
 		    return e.getId().then(function(id) {
 			rs[id] = e;
 		    });
@@ -923,6 +929,11 @@ libVES.Error.Redirect = function(msg, optns) {
     this.init(msg, optns);
 };
 libVES.Error.Redirect.prototype = new libVES.Error('Redirect');
+
+libVES.Error.Unauthorized = function(msg, optns) {
+    this.init(msg, optns);
+};
+libVES.Error.Unauthorized.prototype = new libVES.Error('Unauthorized');
 
 libVES.Error.Internal = function(msg, optns) {
     this.init(msg, optns);

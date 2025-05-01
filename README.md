@@ -44,4 +44,4 @@ Also available: [libVES npm](https://www.npmjs.com/package/libves)
 * Look for comments in WasmOQS/Makefile and WasmECDH/Makefile
 
 ## API Documentation:
-https://ves.host/docs/libVES
+https://ves.host/docs/libVES-subtle

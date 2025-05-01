@@ -45,30 +45,20 @@ libVES.Object.prototype = {
 	this.setFields(data,data.id == null);
 	if (refs) for (var k in refs) this[k] = Promise.resolve(refs[k]);
     },
-    setFields: function(data,up) {
-	var self = this;
-	var chg = false;
-	for (var k in data) {
-	    if (up === undefined || up) this.fieldUpdate[k] = true;
-	    if (this[k] instanceof Promise) {
-		this[k] = undefined;
-		chg = true;
-	    }
-	    if (this[k] === undefined) this[k] = Promise.resolve(data[k]).then((function(k) {
-		return function(v) {
-		    var clsf;
-		    if (self.fieldClass[k]) return (clsf = function(v) {
-			if (v instanceof libVES.Object) return v;
-			else if (v instanceof Array) return v.map(function(vv) { return clsf(vv); });
-			else if (v) return new (self.fieldClass[k])(v,self.VES);
-		    })(v);
-		    return v;
-		};
-	    })(k));
-	    else return Promise.reject(new libVES.Error('Internal',"Unknown field: " + k));
-	}
-	if (chg && self.trigger) self.trigger.resolve(self);
-	return Promise.resolve(self);
+    setFields: function(flds, up) {
+        var res = Promise.resolve(null);
+        for (var fld in flds) ((fld) => {
+            if (up === undefined || up) this.fieldUpdate[fld] = true;
+            var cls = this.fieldClass[fld];
+            var cur = this[fld];
+            res = this[fld] = res.then(() => Promise.resolve(flds[fld]).then((val) => Promise.resolve(cur).catch((er) => undefined).then((cur) => {
+                if (!cls || !val) return val;
+                else if (val instanceof Array) return val.map((v) => ((v instanceof libVES.Object) ? v : new cls(v, this.VES)));
+                else if (cur instanceof cls) return cur.setFields(val, up);
+                else return (val instanceof libVES.Object) ? val : new cls(val, this.VES);
+            })));
+        })(fld);
+        return res.then(() => this);
     },
     setField: function(fld,val,upd) {
 	var flds = {};
@@ -80,57 +70,75 @@ libVES.Object.prototype = {
     unsetField: function(fld) {
 	delete(this[fld]);
     },
+    _fieldsToLoad: function(fldlst, force, ld) {
+        var flds = {};
+        for (var k in fldlst) flds[k] ||= fldlst[k];
+        for (var i = 0; i < this.fieldSets.length; i++) {
+            for (var k in this.fieldSets[i]) if (fldlst[k]) {
+                for (var k in this.fieldSets[i]) if ((force || !this[k]) && !(flds[k] instanceof Object)) (flds ||= {})[k] = this.fieldSets[i][k];
+                break;
+            }
+        }
+        var res = Promise.resolve(null);
+        for (var fld in flds) ((fld) => {
+            var cur = this[fld];
+            var na = (cur === undefined);
+            var cls = this.fieldClass[fld];
+            res = res.then((res) => Promise.resolve(cur).catch((er) => null).then((cur) => {
+                var lst = null;
+                if (force || na) lst = flds[fld];
+                else if (cls) {
+                    if (cur instanceof Array) lst = ((cur[0] instanceof cls) ? cur[0]._fieldsToLoad(flds[fld], force, ld.then((vals) => vals[fld])) : Promise.resolve(null)).then((lst) => (lst && flds[fld]));
+                    else if (cur instanceof cls) lst = cur._fieldsToLoad(flds[fld], force, ld.then((vals) => vals[fld]));
+                }
+                return Promise.resolve(lst).then((lst) => {
+                    if (lst) (res ||= {})[fld] = lst;
+                    return res;
+                });
+            }));
+            if (na || (!cls && force)) (this[fld] = ld.then((vals) => (vals?.hasOwnProperty(fld) ? (cls && vals[fld] ? ((vals[fld] instanceof Array) ? vals[fld].map((e) => new cls(e, this.VES)) : new cls(vals[fld], this.VES)) : vals[fld]) : cur))).catch(() => null);
+        })(fld);
+        ld.then((vals) => {
+            for (var fld in vals) if (!flds[fld] && !this[fld]) this.setField(fld, vals[fld], false);
+        }).catch((er) => null);
+        return res.then((res) => {
+            if (res) for (var k in fldlst) if (res[k]) return res;
+            return null;
+        });
+    },
     getFields: function(fldlst, force) {
-	var self = this;
-	var flds = {};
-	for (var i = 0; i < this.fieldSets.length; i++) {
-	    for (var k in this.fieldSets[i]) if (fldlst[k]) {
-		for (var k in this.fieldSets[i]) if ((force || !this[k]) && !(flds[k] instanceof Object)) flds[k] = this.fieldSets[i][k];
-		break;
-	    }
-	}
-	for (var k in fldlst) if ((force || !this[k]) && !(flds[k] instanceof Object)) flds[k] = fldlst[k];
-	for (var k in flds) {
-	    this.loadFields(flds);
-	    break;
-	}
+        var ldf;
+        var ld = new Promise((resolve, reject) => ldf = [resolve, reject]);
+        this._fieldsToLoad(fldlst, force, ld).then((flds) => this.loadFields(flds, force)).then((vals) => ldf[0](vals)).catch((er) => ldf[1](er));
 	var plst = [];
-	for (var k in fldlst) (function(k) {
-	    plst.push(Promise.resolve(self[k]).then(function rslv(v) {
+	for (var k in fldlst) ((k) => {
+	    plst.push(ld.then(() => this[k]).then(function rslv(v) {
 		if (v instanceof Array) return Promise.all(v.map(function(e, i) {
 		    return rslv(e);
 		}));
 		if (!(v instanceof libVES.Object)) return v;
-		return v.getFields(fldlst[k], force);
+		return v.getFields(fldlst[k]);
 	    }));
 	})(k);
 	var rs = {};
-	return Promise.all(plst).then(function(lst) {
+	return Promise.all(plst).then((lst) => {
 	    var i = 0;
 	    for (var k in fldlst) rs[k] = lst[i++];
 	    return rs;
 	});
     },
     getField: function(fld,fldlst,force) {
-	var self = this;
 	if (!this[fld] || force) {
 	    var flds = {};
-	    for (var i = 0; i < this.fieldSets.length; i++) if (this.fieldSets[i][fld]) {
-		for (var k in this.fieldSets[i]) flds[k] = this.fieldSets[i][k];
-		break;
-	    }
-	    if (fldlst) flds[fld] = fldlst;
-	    if (!flds[fld]) {
-		var cls = self.fieldClass[fld];
-		flds[fld] = cls ? cls.prototype.fieldList : true;
-	    }
-	    this.loadFields(flds,force);
+            flds[fld] = fldlst || true;
+	    this.getFields(flds, force).catch(() => null);
 	}
 	return this[fld];
     },
     loadFields: function(flds,force,optns) {
+        if (!flds) return Promise.resolve({});
 	var self = this;
-	var req = this.id ? this.id.then(function(id) {  return self.VES.get(self.apiUri + '/' + id,flds,optns); }) : self.postData().then(function(data) {
+	return (this.id && !flds.id ? this.id.then(function(id) {  return self.VES.get(self.apiUri + '/' + id,flds,optns); }) : self.postData().then(function(data) {
 	    data['$op'] = 'fetch';
 	    return self.VES.post(self.apiUri,data,flds,optns);
 	}).then(function(data) {
@@ -139,18 +147,7 @@ libVES.Object.prototype = {
 		self.fieldUpdate = {id: true};
 	    }
 	    return data;
-	});
-	for (var k in flds) if (force || this[k] === undefined) {
-	    this[k] = req.then((function(fld) {
-		var cls = self.fieldClass[fld];
-		return function(data) {
-		    if (cls && data[fld]) return ((data[fld] instanceof Array) ? data[fld].map(function(v) {
-			return new cls(v,self.VES);
-		    }) : new cls(data[fld],self.VES));
-		    return data[fld];
-		};
-	    })(k));
-	}
+	})).then((data) => libVES.Util.fillUndefs(data, flds));
     },
     reset: function() {
 	for (var k in this.fieldClass) this.unsetField(k);
@@ -241,6 +238,9 @@ libVES.Object.prototype = {
 	    })(this[k], k);
 	}
 	return Promise.all(rs);
+    },
+    toJSON: function() {
+        return String(this);
     }
 };
 
@@ -393,7 +393,7 @@ libVES.VaultKey.prototype = new libVES.Object({
 	    case 'lost':
 		return self.getVaultItems().then(function(vis) {
 		    var f = function(vis) {
-			if (!vis.length) throw new libVES.Error('InvalidKey','Cannot unlock the secondary key');
+			if (!vis || !vis.length) throw new libVES.Error('InvalidKey','Cannot unlock the secondary key');
 			return vis[0].getType().then(function(t) {
 			    switch (t) {
 				case 'password': return self.getId().then(function(kid) {
@@ -641,8 +641,20 @@ libVES.VaultKey.prototype = new libVES.Object({
 	    });
 	});
     },
-    matchVaults: function(vaultKeys) {
-	return Promise.resolve(false);
+    matchVaults: function(shares) {
+        return this.getFields({id: true, externals: {domain: true, externalId: true}, user: {email: true}}).then((flds) => (shares || []).reduce((res, sh) => res.then((res) => Promise.resolve(sh).then((sh) => {
+            if (res) return res;
+            var ext = flds.externals?.[0];
+            if (sh instanceof libVES.Object) {
+                if (sh instanceof libVES.VaultKey) return sh.getId().then((id) => (id == flds.id ? sh : res));
+                else if ((sh instanceof libVES.External) && ext) return sh.getFields({domain: true, externalId: true}).then((xflds) => (xflds.domain == ext.domain && xflds.externalId == ext.externalId ? sh : res));
+                else if ((sh instanceof libVES.User) && flds.user && !ext) return sh.getEmail().then((email) => (email == flds.user.email ? sh : res));
+            } else if (sh instanceof Object) {
+                if (sh.externalId && sh.externalId == ext?.externalId && (sh.domain || this.VES.domain) == ext.domain) return sh;
+                else if (sh.email && sh.email == flds.user?.email && !ext) return sh;
+            } else if (sh && flds.user?.email == sh && !ext) return sh;
+            return res;
+        })), Promise.resolve(false)));
     },
     getKeyOptions: function() {
 	var self = this;
@@ -658,7 +670,7 @@ libVES.VaultItem.prototype = new libVES.Object({
     apiUri: 'vaultItems',
     fieldList: {id: true, deleted: true, file: true},
     fieldClass: {vaultKey: libVES.VaultKey, file: libVES.File},
-    fieldSets: [{type: true, meta: true},{vaultEntries: {id: true, encData: true, vaultKey: {id: true, type: true, user: {id: true}, algo: true, externals: {id: true}}}},{vaultKey: true, file: true}],
+    fieldSets: [{type: true, meta: true},{vaultEntries: {id: true, encData: true, vaultKey: {id: true, type: true, user: {id: true, email: true}, algo: true, externals: {id: true, domain: true, externalId: true}}}},{vaultKey: true, file: true}],
     defaultCipher: 'AES256GCM',
     getRaw: function() {
 	var self = this;
@@ -730,7 +742,10 @@ libVES.VaultItem.prototype = new libVES.Object({
     },
     build: function(data) {
 	var self = this;
-	return this.getType().then(function(type) {
+	return this.getType().catch(function(e) {
+            if (e && e.code == 'NotFound') return self.setField('type', libVES.VaultItem.Type._detect(data));
+            throw e;
+        }).then(function(type) {
 	    return libVES.getModule(libVES.VaultItem.Type,type).then(function(m) {
 		return m.build.call(self,data);
 	    });
@@ -747,7 +762,7 @@ libVES.VaultItem.prototype = new libVES.Object({
 		var k_used = {};
 		for (var j = 0; j < ves.length; j++) k_ves[ves[j].vaultKey.id] = ves[j];
 		return Promise.all(ks.map(function(k,j) {
-		    return k.getId().then(function(k_id) {
+		    if (!k.fieldUpdate.privateKey) return k.getId().then(function(k_id) {
 			k_used[k_id] = true;
 			return k_ves[k_id];
 		    }).catch(function(){});
@@ -777,8 +792,8 @@ libVES.VaultItem.prototype = new libVES.Object({
 		    }));
 		})).then(function() {
 		    return Promise.all(old_ves.slice(ks.length).map(function(ve,j) {
-			return (new libVES.VaultKey(ve.vaultKey,self.VES)).matchVaults(ks).then(function(f) {
-			    if (f === false) set_ves.push({vaultKey: {id: ve.vaultKey.id}, '$op': 'delete'});
+			return (new libVES.VaultKey(ve.vaultKey,self.VES)).matchVaults(usrs).then(function(f) {
+			    if (!f) set_ves.push({vaultKey: {id: ve.vaultKey.id}, '$op': 'delete'});
 			});
 		    }));
 		}).then(function() {
@@ -789,12 +804,18 @@ libVES.VaultItem.prototype = new libVES.Object({
 	}).then(function() {
 	    if (self.id && val != null) return self.setUpdate({id: false, type: true, file: {id: false, externals: {id: false, domain: true, externalId: true}}});
 	}).then(function() {
-	    if (save || save === undefined) return self.post(undefined, undefined, ((save instanceof Object) ? save : undefined)).then(function() {
-		delete(self.vaultEntries);
+	    if (save || save === undefined) return self.post(undefined, undefined, ((save instanceof Object) ? save : undefined)).then(function(flds) {
+                self.vaultEntryByKey = {};
+                self.setFields(flds, false);
 		return self;
+	    }).finally(function() {
+		delete(self.vaultEntries);
 	    });
 	    return self;
-	});
+	}).catch(function(er) {
+	    delete(self.vaultEntries);
+	    throw er;
+        });
     },
     reshareWith: function(share,val,save) {
 	var self = this;
@@ -818,27 +839,7 @@ libVES.VaultItem.prototype = new libVES.Object({
 	});
     },
     unshareWith: function(share, save) {
-	var self = this;
-	return self.VES.usersToKeys(share).then(function(del_ks) {
-	    return self.getShareVaultKeys().then(function(curr_ks) {
-		var m_del_ks = {};
-		return Promise.all(del_ks.map(function(k,i) {
-		    return k.getId().then(function(id) {
-			m_del_ks[id] = true;
-		    });
-		})).then(function() {
-		    return Promise.all(curr_ks.map(function(k,i) {
-			return k.getId();
-		    })).then(function(curr_ids) {
-			return curr_ks.filter(function(k, i) {
-			    return !m_del_ks[curr_ids[i]];
-			});
-		    }).then(function(curr_ks) {
-			return self.shareWith(curr_ks, undefined, save);
-		    });
-		});
-	    });
-	});
+        return this.getShareVaultKeys().then((vkeys) => Promise.all(vkeys.map((vkey) => vkey.matchVaults(share))).then((del) => this.shareWith(vkeys.filter((vkey, i) => !del[i]), undefined, save)));
     },
     set: function(val, save) {
 	var self = this;
@@ -884,7 +885,7 @@ libVES.VaultItem.prototype = new libVES.Object({
     delete: function() {
 	var self = this;
 	return self.getId().then(function(id) {
-	    return this.VES.post(self.apiUri + '/' + id, {'$op': 'delete'});
+	    return self.VES.post(self.apiUri + '/' + id, {'$op': 'delete'});
 	});
     }
 });

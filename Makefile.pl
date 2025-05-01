@@ -28,7 +28,7 @@
 # *
 # ***************************************************************************/
 
-@Src = ('libVES-base.js','libVES.Util.js','libVES.Math.js','libVES.Object.js','libVES.Algo.js','libVES.Cipher.js','libVES.Scramble.js','libVES.Recovery.js','libVES.Delegate.js','libVES.Flow.js', 'libVES.Auth.js', 'libVES.Algo.OQS.js', 'libVES.Watch.js');
+@Src = ('libVES-base.js','libVES.Util.js','libVES.Math.js','libVES.Object.js','libVES.Algo.js','libVES.Cipher.js','libVES.Scramble.js','libVES.Recovery.js','libVES.Delegate.js','libVES.Flow.js', 'libVES.Auth.js', 'libVES.Algo.OQS.js', 'libVES.Watch.js', 'libVES.Vault.js', 'libVES.Item.js');
 
 open VER,'VERSION';
 chomp($Version = <VER>);

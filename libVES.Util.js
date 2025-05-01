@@ -103,6 +103,14 @@ libVES.Util = {
 	}
 	return rs;
     },
+    fillUndefs: function(data, defs) {
+        if (data instanceof Array) data.map((d) => libVES.Util.fillUndefs(d, defs));
+        else if (data && defs) for (var k in defs) if (defs[k]) {
+            if (data[k] === undefined) data[k] = undefined;
+            else if (data[k] instanceof Object) libVES.Util.fillUndefs(data[k], defs[k]);
+        }
+        return data;
+    },
     loadWasm: function(src) {
 	return new Promise(function(resolve, reject) {
 	    var sc = document.createElement('script');

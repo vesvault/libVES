@@ -1,0 +1,362 @@
+/***************************************************************************
+ *          ___       ___
+ *         /   \     /   \    VESvault
+ *         \__ /     \ __/    Encrypt Everything without fear of losing the Key
+ *            \\     //                   https://vesvault.com https://ves.host
+ *             \\   //
+ *     ___      \\_//
+ *    /   \     /   \         libVES.Watch: Event Observer
+ *    \__ /     \ __/
+ *       \\     //
+ *        \\   //
+ *         \\_//
+ *         /   \
+ *         \___/
+ *
+ *
+ * (c) 2024 VESvault Corp
+ * Jim Zubov <jz@vesvault.com>
+ *
+ * GNU General Public License v3
+ * You may opt to use, copy, modify, merge, publish, distribute and/or sell
+ * copies of the Software, and permit persons to whom the Software is
+ * furnished to do so, under the terms of the COPYING file.
+ *
+ * This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
+ * KIND, either express or implied.
+ *
+ * @author Jim Zubov <jz@vesvault.com> (VESvault Corp)
+ *
+ ***************************************************************************/
+
+
+libVES.Item = class extends libVES.EventTarget {
+    constructor(ref, vault, fields) {
+        const ves = vault.vaultKey.VES;
+        super();
+        if (ref == null || typeof(ref) == 'function') {
+            this.provisional = {share: [vault], ref: (ref || libVES.Item.newRef)};
+        } else {
+            ref = libVES.Vault.toRef(ref, ves);
+            if ((!ref.domain || !ref.externalId) && !ref.version) throw new libVES.Error.InvalidValue('Bad item reference');
+            this.domain = ref.domain;
+            this.externalId = ref.externalId;
+            this.version = ref.version || null;
+        }
+        this.vault = vault;
+        this._vaultItem(ves, fields);
+    };
+
+    static newRef() {
+        let d = new Date();
+        return ((d.getFullYear() * 100 + d.getMonth() + 1) * 100 + d.getDate()).toFixed(0) + '.' + (((d.getHours() + 100) * 100 + d.getMinutes()) * 100 + d.getSeconds() + d.getMilliseconds() / 1000).toFixed(3).slice(-10);
+    }
+
+    _vaultItem(ves, fields) {
+        if (this.vaultItem && this._entriesCache !== null) return this.vaultItem;
+        ves ||= this.vaultItem.VES;
+        if (!fields) {
+            fields = this.externalId ? {file: {externals: [{domain: this.domain, externalId: this.externalId}]}} : {};
+            if (this.version) fields.id = this.version;
+        } else if (fields.vaultEntries) this._entriesCache = Promise.resolve(fields).finally(() => this._entriesCache = null);
+        return this.vaultItem = new libVES.VaultItem(fields, ves);
+    };
+
+    _entries() {
+        if (this.provisional) return Promise.reject(new libVES.Error.NotFound('Not available for a provisional item'));
+        if (this._entriesCache) return this._entriesCache;
+        this._entriesCache = this._vaultItem().getFields({vaultEntries: {encData: true, vaultKey: {id: true, type: true, algo: true, privateKey: true, publicKey: true, user: {id: true, email: true}, externals: {domain: true, externalId: true}}}, file: {creator: {id: true}}, vaultKey: {user: {id: true}}, deleted: true}).then((flds) => {
+            if (!flds?.vaultEntries) return Promise.reject(new libVES.Error.InvalidKey('Not authorized to access this item'));
+            return flds;
+        });
+        this._entriesCache.catch((er) => null).finally(() => this._entriesCache = null);
+        return this._entriesCache;
+    };
+
+    _get() {
+        return this._entries().then(() => this.vaultItem.get());
+    };
+
+    _reset() {
+        this._entriesCache = null;
+    };
+
+    latest() {
+        return this.externalId && this.version ? this.vault.item({domain: this.domain, externalId: this.externalId}) : this;
+    };
+
+    get() {
+        return this._get().then((val) => {
+            if (typeof(val) != 'string') throw new libVES.Error.InvalidValue('The item value is not a string');
+            return val;
+        });
+    };
+
+    put(value, shares) {
+        if (value == null) return Promise.reject(new libVES.Error.InvalidValue('The item value cannot be empty'));
+        let prref;
+        return (shares ? Promise.resolve(libVES.Vault.toRefs(shares, this.vaultItem.VES, true)) : this.share().then((shares) => {
+            let owner = shares.reduce((cur, sh) => (cur || ((sh.owner && sh.externalId?.match(/@/)) ? sh : null)), null);
+            if (owner && owner.uri() != this.vault.uri()) shares.push(this.vault.vault({domain: '.admin', externalId: owner.externalId}));
+            return shares;
+        }).catch((e) => {
+            if (e && e.code == 'NotFound') return libVES.Vault.toRefs([], this.vaultItem.VES, true);
+            throw e;
+        })).then((shares) => {
+            if (!this.provisional) return shares;
+            prref = libVES.Vault.toRef(this.provisional.ref(), this.vaultItem.VES);
+            if (!prref?.externalId) return Promise.reject(new libVES.Error.InvalidValue('Bad provisional reference generated by the supplied function'));
+            return this.vaultItem.setFields({file: {externals: [prref]}}).then(() => shares);
+        }).then((shares) => this.vaultItem.shareWith(shares, value)).then(() => {
+            if (prref) {
+                this.externalId = prref.externalId;
+                this.domain = prref.domain;
+                delete(this.provisional);
+            }
+            this.version = null;
+            this._reset();
+            return value;
+        });
+    };
+
+    cipher(optns, shares) {
+        return this._get().then((val) => {
+            if (!(val instanceof libVES.Cipher)) throw new libVES.Error.InvalidValue('The item value is not a cipher');
+            return (shares ? this.share(shares) : Promise.resolve(null)).then(() => val);
+        }).catch((e) => {
+            if (e && e.code == 'NotFound') {
+                let algo = optns?.algo || this.vaultItem.VES.cipherAlgo || 'AES256GCM1K';
+                if (!libVES.Cipher[algo]) throw new libVES.Error.InvalidValue('Unsupported cipher: ' + algo);
+                let ci = new libVES.Cipher[algo]();
+                return this.put(ci, shares);
+            }
+            throw e;
+        }).then((ci) => new libVES.ItemCipher(ci, this));
+    };
+
+    json(val, shares) {
+        if (val === undefined) return this.get().then((val) => JSON.parse(val));
+        return this.put(JSON.stringify(val), shares).then(() => val);
+    };
+
+    exists() {
+        return this._entries().then((flds) => !flds?.deleted).catch((e) => {
+            if (e?.code == 'NotFound') return false;
+            if (e?.code == 'InvalidKey') return true;
+            throw e;
+        });
+    };
+
+    _provShare(shares, del) {
+        return new Promise((resolve, reject) => {
+            let uris = libVES.Vault.toRefs(shares, this.vaultItem.VES).map((ref) => this.vault.vault(ref).uri());
+            let prov = {};
+            this.provisional.share.map((sh) => prov[sh.uri()] = sh);
+            resolve(this.vaultItem.VES.usersToKeys(libVES.Vault.toRefs(uris.filter((uri) => !prov[uri]))));
+        }).then((vkeys) => Promise.all(vkeys.map((vkey => vkey.getFields({user: {email: true}, externals: {domain: true, externalId: true}, type: true}).then((flds) => {
+            let sh = new libVES.Vault((flds?.externals?.[0] ?? flds?.user?.email), this.vaultItem.VES, flds);
+            if (sh) return sh.verify();
+        }))))).then((shares) => shares.filter((sh) => sh)).then((shares) => {
+            this.provisional.share = this.provisional.share.concat(shares);
+            if (del) {
+                let uris = {};
+                shares.map((sh) => uris[sh.uri()] = sh);
+                uris[this.vault.uri()] = this.vault;
+                this.provisional.share = this.provisional.share.filter((sh) => uris[sh.uri()]);
+            }
+            return this.provisional.share;
+        });
+    }
+
+    share(shares) {
+        if (this.provisional) {
+            if (shares) return this._provShare(shares, true);
+            return Promise.resolve(this.provisional.share);
+        }
+        return (shares ? (this._reset(), this.vaultItem.shareWith(libVES.Vault.toRefs(shares, this.vaultItem.VES, true))) : Promise.resolve(null)).then(() => {
+            let result = [];
+            let found = {};
+            let admins = {};
+            return this._entries().then((flds) => flds.vaultEntries.map((entry) => {
+                let vkey = entry?.vaultKey;
+                let ref = vkey?.externals?.[0];
+                if (!ref) {
+                    const email = vkey?.user?.email;
+                    ref = email ? {email: email} : {version: vkey?.id};
+                }
+                let vault = new libVES.Vault(ref, this.vaultItem.VES);
+                let uri = vault.uri();
+                if (!found[uri]) {
+                    result.push(found[uri] = vault);
+                    let uid = vkey?.user?.id;
+                    vault.owner = !!uid && uid == (flds.file?.creator?.id ?? flds.vaultKey?.user?.id);
+                    if (vault.domain == '.admin') admins[vault.externalId] = true;
+                }
+                switch (vkey?.type) {
+                    case 'current': case 'secondary':
+                        found[uri].current = true;
+                        break;
+                    default:
+                        vault.current = false;
+                }
+            })).then(() => {
+                result.map((sh) => sh.admin = !!admins[sh.externalId]);
+                return result;
+            });
+        });
+    };
+
+    add(shares) {
+        if (this.provisional) return this._provShare(shares, false).then(() => true);
+        return this._entries().then(() => this.vaultItem.getShareVaultKeys()).then((vkeys) => {
+            if (!vkeys) throw new libVES.Error.InvalidKey('Not authorized to share this item');
+            if (!shares) return true;
+            libVES.Vault.toRefs(shares, this.vaultItem.VES).map((share) => vkeys.push(share));
+            this._reset();
+            return this.vaultItem.shareWith(vkeys);
+        }).then(() => true);
+    };
+
+    remove(shares) {
+        shares = libVES.Vault.toRefs(shares, this.vaultItem.VES);
+        if (!shares || !shares.length) return Promise.resolve(true);
+        if (this.provisional) return new Promise((resolve, reject) => {
+            let uris = {};
+            shares.map((sh) => uris[this.vault.vault(sh).uri()] = true);
+            this.provisional.share = this.provisional.share.filter((sh) => !uris[sh.uri()]);
+            resolve(true);
+        });
+        return this._entries().then(() => this.vaultItem.unshareWith(shares)).then(() => (this._reset(), true));
+    };
+
+    refuse() {
+        return this.remove(this.vault);
+    };
+
+    delete() {
+        this._reset();
+        return this.vaultItem.delete();
+    }
+
+    badauth() {
+        return (this.vaultItem.VES == this.vault.vaultKey.VES ? this.vault.badauth() : Promise.resolve(null)).then(() => this.vaultItem.VES = this.vault.vaultKey.VES);
+    }
+
+    shareFor(share) {
+        let uri = this.vault.vault(share).uri();
+        return uri ? this.share().then((shares) => shares.reduce((res, sh) => (res ?? (sh.uri() == uri ? sh : null)), null)) : null;
+    }
+
+    uri() {
+        if (!this.externalId && !this.version) return null;
+        return libVES.Vault.toUri(this);
+    }
+
+    short() {
+        if (!this.externalId) return null;
+        return libVES.Vault.toUri(this, this.vaultItem.VES.domain);
+    }
+
+    _eventTracker() {
+        return new libVES.EventTracker(this.vault, true);
+    }
+
+    createWatch() {
+        let w = new libVES.Watch(this.vaultItem);
+        w.fields = {vaultKey: {id: true, type: true, algo: true, publicKey: true, externals: {domain: true, externalId: true}, user: {id: true, email: true}}, vaultItem: {id: true, type: true, meta: true, deleted: true, vaultKey: {id: true, type: true, algo: true, publicKey: true, externals: {domain: true, externalId: true}, user: {id: true, email: true}}, file: {externals: {domain: true, externalId: true}, creator: true}}, authorSession: {vaultKey: {id: true, type: true, externals: {domain: true, externalId: true}}, domain: true, user: {email: true}, remote: true, userAgent: true}};
+        return w;
+    }
+
+    replay() {
+        return this.share().then((vaults) => Promise.all(vaults.map((vault) => {
+            if (this.externalId) return new libVES.CustomEvent('itemadd', {detail: {replay: true, item: this, share: vault}});
+            else return new libVES.CustomEvent('vaultadd', {detail: {replay: true, vault: this.vault, share: vault}});
+        })));
+    }
+
+    readable() {
+        return this._get().then(() => true).catch((er) => {
+            switch (er?.code) {
+                case 'NotFound':
+                case 'InvalidKey': return false;
+                default: throw er;
+            }
+        });
+    }
+
+    writable() {
+        return this.shareFor(this.vault).then((sh) => sh && (sh.owner || sh.admin)).catch((er) => {
+            switch (er?.code) {
+                case 'NotFound': return true;
+                case 'InvalidKey': return false;
+                default: throw er;
+            }
+        });
+    }
+
+    toString() {
+        return 'libVES.Item(' + (this.uri() ?? '[provisional]') + ')';
+    }
+
+};
+
+libVES.ItemCipher = class {
+    constructor(ci, item) {
+        this.cipher = ci;
+        this.item = item;
+    }
+
+    meta(val) {
+        if (val == null) return Promise.resolve(this.cipher.meta);
+        if (!(val instanceof Object)) return Promise.reject(new libVES.Error.InvalidValue('Cipher metadata must be an object'));
+        this.cipher.meta = val;
+        return this.item.put(this.cipher).then(() => this.cipher.meta);
+    }
+
+    reset(final) {
+        if (final && !this.final) return Promise.resolve(null);
+        this.final = false;
+        return this.item.vaultItem.get().then((ci) => this.cipher = ci);
+    }
+
+    encrypt(data, optns) {
+        return this.reset(true).then(() => {
+            this.final = optns?.final !== false;
+            if (data instanceof Blob) {
+                return data.arrayBuffer().then((buf) => this.cipher.encrypt(buf, this.final)).then((ctext) => {
+                    const op = {type: 'application/vnd.ves.encrypted'};
+                    if (optns) optns.type = data.type;
+                    if (data instanceof File) {
+                        if (optns) optns.name = data.name;
+                        return new File([ctext], this.item.externalId, op);
+                    }
+                    return new Blob([ctext], op);
+                });
+            } else if (data instanceof ArrayBuffer) return this.cipher.encrypt(data, this.final).then((ctext) => ctext.buffer);
+            else if ((data instanceof Object) && (data.buffer instanceof ArrayBuffer)) return this.cipher.encrypt(data.buffer, this.final).then((ctext) => new data.constructor(ctext.buffer));
+            else return this.cipher.encrypt(libVES.Util.StringToByteArray(String(data)), this.final).then((ctext) => libVES.Util.ByteArrayToB64(ctext));
+        });
+    }
+
+    decrypt(data, optns) {
+        return this.reset(true).then(() => {
+            this.final = optns?.final !== false;
+            if (data instanceof Blob) {
+                return data.arrayBuffer().then((buf) => this.cipher.decrypt(buf, this.final)).then((ctext) => {
+                    if (data instanceof File) return new File([ctext], (optns?.name || ''), optns);
+                    return new Blob([ctext], optns);
+                });
+            } else if (data instanceof ArrayBuffer) return this.cipher.decrypt(data, this.final).then((ctext) => ctext.buffer);
+            else if ((data instanceof Object) && (data.buffer instanceof ArrayBuffer)) return this.cipher.decrypt(data.buffer, this.final).then((ctext) => new data.constructor(ctext.buffer));
+            else return this.cipher.decrypt(libVES.Util.B64ToByteArray(String(data)), this.final).then((ctext) => libVES.Util.ByteArrayToString(ctext));
+        });
+    }
+
+    toString() {
+        return 'libVES.ItemCipher(' + String(this.item) + ')';
+    }
+
+    toJSON() {
+        return this.item?.uri();
+    }
+};
