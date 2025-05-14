@@ -53,7 +53,7 @@ libVES.prototype = {
     keyOptions: {namedCurve: 'P-521'},
     textCipher: 'AES256GCMp',
     defaultHash: 'SHA256',
-    propagators: [],
+    propagators: null,
     request: function(method,uri,body,optns) {
 	var self = this;
 	if (!optns) optns = {};
@@ -256,6 +256,7 @@ libVES.prototype = {
 	for (var kid in this.unlockedKeys) lock.push(this.unlockedKeys[kid].then(function(k) {
 	    return k.lock();
 	}).catch(function() {}));
+        this.propagators = null;
 	return Promise.all(lock).then(function() {
 	    return true;
 	});
@@ -415,6 +416,20 @@ libVES.prototype = {
 	    });
 	});
     },
+    getPropagators: function() {
+        if (!this.propagators) {
+            let xid = (this.externalId ?? this.email);
+            this.propagators = (xid?.match(/^[^\!]+\@\w/) ? Promise.resolve(xid.replace(/\!.*/, '')) : this.me().then((me) => me.getEmail())).then((xid) => {
+                if (!xid) return [];
+                let prop = new libVES.VaultKey({externals: {domain: '.propagate', externalId: xid.toLowerCase()}}, this);
+                return prop.getId().then(() => [prop]);
+            }).catch((er) => {
+                if (er?.code == 'NotFound' || er?.code == 'Unauthorized') return [];
+                throw er;
+            });
+        }
+        return Promise.resolve(this.propagators);
+    },
     getUserKeys: function(usr) {
 	var self = this;
 	return usr.getActiveVaultKeys().catch(function(e) {
@@ -449,8 +464,7 @@ libVES.prototype = {
 		}).catch(function(e) {
 		    if (e.code != 'NotFound') throw e;
 		    var sh = self.type == 'secondary' ? [self.me(), self.getVaultKey()] : [self.me()];
-		    if (self.propagators) for (var i = 0; i < self.propagators.length; i++) sh.push(self.propagators[i]);
-		    return sh;
+                    return self.getPropagators().then((props) => sh.concat(props)).catch((er) => sh);
 		}).then(function(sh) {
 		    return Promise.all(sh);
 		}).then(function(sh) {
@@ -865,11 +879,20 @@ libVES.prototype = {
 					return vkey.rekey(optns);
 				    });
 				    else return vkey.getVaultItems().then(function(vis) {
-					return self.elevateAuth().then(function(optns) {
-					    return Promise.all(vis.map(function(vi, i) {
-						return vi.reshareWith([user], undefined, optns);
-					    }));
-					});
+                                        return Promise.all([user.getActiveVaultKeys(), vkey.getExternals().then((exts) => {
+                                            let ckey = new libVES.VaultKey({externals: exts}, self);
+                                            return ckey.getType().then(() => [ckey]).catch((er) => {
+                                                if (er?.code != 'NotFound') throw er;
+                                                return [];
+                                            });
+                                        })]).then((klists) => {
+                                            let ks = (klists[0] ?? []).concat(klists[1]);
+                                            return Promise.all(ks.map((k) => k.getType())).then((ktypes) => ks.filter((k, i) => ktypes[i] != 'temp'));
+                                        }).then((ks) => self.elevateAuth().then(function(optns) {
+                                            return Promise.all(vis.map(function(vi, i) {
+                                                return vi.reshareWith(ks, undefined, optns);
+                                            }));
+                                        }));
 				    });
 				});
 			    });

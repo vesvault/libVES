@@ -95,7 +95,7 @@ libVES.Vault = class extends libVES.EventTarget {
         fields ||= {};
         if (ref.externalId) fields.externals = [{domain: (this.domain = String(ref.domain)), externalId: (this.externalId = String(ref.externalId))}];
         this.email = ref.email || '';
-        if (ref.email) fields.email = this.email;
+        if (ref.email) fields.user = {email: this.email};
         if (ref.version) this.version = fields.id = Number(ref.version);
         if (!fields.id) fields.type = this.externalId ? 'secondary' : 'current';
         this.vaultKey = new libVES.VaultKey(fields, ves);
@@ -144,22 +144,30 @@ libVES.Vault = class extends libVES.EventTarget {
         return this.objects(optns).then((objs) => objs.filter((obj) => (obj instanceof libVES.Vault)));
     }
 
+    reauth() {
+        clearTimeout(this.refreshTmout);
+        return this.vaultKey.loadFields({encSessionToken: true}, true, {token: ''}).then((flds) => this.vaultKey.setFields(flds)).then(() => this.vaultKey.getSessionToken()).then((tk) => {
+            this.vaultKey.VES.token = tk;
+            return this;
+        });
+    }
+
     _setunlock(reauth) {
         this.current = true;
-        this.owner = this.externalId[0] != '!';
+        this.owner = this.externalId?.[0] != '!';
         this.lock(600);
         let rf;
-        if (reauth !== false) (rf = (tmout) => {
+        if (reauth !== false  && this.externalId) (rf = (tmout) => {
             this.refreshTmout = setTimeout(() => {
-                this.vaultKey.loadFields({encSessionToken: true}, true, {token: ''}).then((flds) => this.vaultKey.setFields(flds)).then(() => this.vaultKey.getSessionToken()).then((tk) => {
-                    this.vaultKey.VES.token = tk;
-                    rf();
-                }).catch((er) => {
+                this.reauth().then(() => rf()).catch((er) => {
                     console.log(er);
                     rf(60000);
                 });
             }, (tmout || 14400000));
         })();
+        if (this.appUrl === undefined) try {
+            this.appUrl = document.location.origin;
+        } catch(er) {}
         return this;
     }
 
@@ -253,8 +261,9 @@ libVES.Vault = class extends libVES.EventTarget {
         if (!(refs instanceof Array)) refs = [refs];
         refs = refs.map((ref) => libVES.Vault.toRef(ref, ves)).filter((ref) => ref);
         if (owner) {
-            if (!ves.externalId) throw new libVES.Error.Unauthorized('The vault is locked');
-            refs.push({domain: ves.domain, externalId: ves.externalId});
+            if (ves.externalId) refs.push({domain: ves.domain, externalId: ves.externalId});
+            else if (ves.user) refs.push({email: ves.user});
+            else throw new libVES.Error.Unauthorized('The vault is locked');
         }
         return refs;
     }
@@ -329,6 +338,14 @@ libVES.Vault = class extends libVES.EventTarget {
 
     _eventTracker() {
         return new libVES.EventTracker(this);
+    }
+
+    toAppRefs(refs, ves, owner) {
+        let shares = libVES.Vault.toRefs(refs, ves, owner);
+        if (this.appUrl !== undefined) shares.map((share) => {
+            if (share.appUrl === undefined) share.appUrl = this.appUrl;
+        });
+        return shares;
     }
 
     toString() {
@@ -419,7 +436,8 @@ libVES.EventTracker = class {
                 case 'vaultItem.created':
                     return itemfn('create');
                 case 'vaultItem.listening':
-                    return itemfn('change');
+                case 'vaultKey.listening':
+                    return itemfn('change', attn !== false);
                 case 'session.created':
                     return e.getFields({session: {id: true, remote: true, userAgent: true, vaultKey: {id: true}, user: {id: true}}}).then((flds) => {
                         if (!flds?.session) return null;

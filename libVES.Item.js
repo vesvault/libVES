@@ -95,7 +95,7 @@ libVES.Item = class extends libVES.EventTarget {
     put(value, shares) {
         if (value == null) return Promise.reject(new libVES.Error.InvalidValue('The item value cannot be empty'));
         let prref;
-        return (shares ? Promise.resolve(libVES.Vault.toRefs(shares, this.vaultItem.VES, true)) : this.share().then((shares) => {
+        return (shares ? Promise.resolve(this.vault.toAppRefs(shares, this.vaultItem.VES, true)) : this.share().then((shares) => {
             let owner = shares.reduce((cur, sh) => (cur || ((sh.owner && sh.externalId?.match(/@/)) ? sh : null)), null);
             if (owner && owner.uri() != this.vault.uri()) shares.push(this.vault.vault({domain: '.admin', externalId: owner.externalId}));
             return shares;
@@ -157,7 +157,7 @@ libVES.Item = class extends libVES.EventTarget {
             let sh = new libVES.Vault((flds?.externals?.[0] ?? flds?.user?.email), this.vaultItem.VES, flds);
             if (sh) return sh.verify();
         }))))).then((shares) => shares.filter((sh) => sh)).then((shares) => {
-            this.provisional.share = this.provisional.share.concat(shares);
+            this.provisional.share = this.provisional.share.concat(this.vault.toAppRefs(shares));
             if (del) {
                 let uris = {};
                 shares.map((sh) => uris[sh.uri()] = sh);
@@ -173,7 +173,7 @@ libVES.Item = class extends libVES.EventTarget {
             if (shares) return this._provShare(shares, true);
             return Promise.resolve(this.provisional.share);
         }
-        return (shares ? (this._reset(), this.vaultItem.shareWith(libVES.Vault.toRefs(shares, this.vaultItem.VES, true))) : Promise.resolve(null)).then(() => {
+        return (shares ? (this._reset(), this.vaultItem.shareWith(this.vault.toAppRefs(shares, this.vaultItem.VES, true))) : Promise.resolve(null)).then(() => {
             let result = [];
             let found = {};
             let admins = {};
@@ -211,7 +211,7 @@ libVES.Item = class extends libVES.EventTarget {
         return this._entries().then(() => this.vaultItem.getShareVaultKeys()).then((vkeys) => {
             if (!vkeys) throw new libVES.Error.InvalidKey('Not authorized to share this item');
             if (!shares) return true;
-            libVES.Vault.toRefs(shares, this.vaultItem.VES).map((share) => vkeys.push(share));
+            this.vault.toAppRefs(shares, this.vaultItem.VES).map((share) => vkeys.push(share));
             this._reset();
             return this.vaultItem.shareWith(vkeys);
         }).then(() => true);
@@ -235,7 +235,7 @@ libVES.Item = class extends libVES.EventTarget {
 
     delete() {
         this._reset();
-        return this.vaultItem.delete();
+        return this.vaultItem.delete().then(() => true);
     }
 
     badauth() {
