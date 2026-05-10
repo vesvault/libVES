@@ -831,7 +831,7 @@ libVES.VaultItem.prototype = new libVES.Object({
 			    if (e.code != 'NotFound') throw e;
 			});
 		    })).then(function(new_ids) {
-			for (var i = 0; i < new_ks.length; i++) if (!m_curr_ks[new_ids[i]]) curr_ks.push(m_curr_ks[new_ids[i]] = new_ks[i]);
+			for (var i = 0; i < new_ks.length; i++) if (!new_ids[i] || !m_curr_ks[new_ids[i]]) curr_ks.push(m_curr_ks[new_ids[i]] = new_ks[i]);
 			return self.shareWith(curr_ks,val,save);
 		    });
 		});

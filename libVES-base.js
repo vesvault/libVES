@@ -386,7 +386,7 @@ libVES.prototype = {
 	    throw new libVES.Error('NotFound', 'Cannot match externalId for domain:' + ext.domain + ', user:' + user + '. Define libVES.Domain.' + ext.domain + '.userToVaultRef(user) to return a valid reference.',{error: e});
 	})).then(function(exts) {
             var keyref = {externals: exts};
-            if (self.externalId && self.externalId[0] != '!') keyref.creator = self.me();
+            if (!self.externalId || self.externalId[0] != '!') keyref.creator = self.me();
 	    var vkey = new libVES.VaultKey(keyref, self);
 	    return vkey.getId().then(function() {
 		return vkey;
@@ -576,6 +576,7 @@ libVES.prototype = {
 			    return k.post(undefined, undefined, optns).then(function(post) {
 				return k.setField('id', post.id, false).then(function() {
 				    k.fieldUpdate = {id: true};
+                                    k.unsetField('vaultItems');
 				    return k;
 				});
 			    });
