@@ -570,8 +570,9 @@ libVES.prototype = {
 		    k.setField('vaultItems',[vi]);
 		    return Promise.resolve(veskey).then(function(v) {
 			if (!v) throw new libVES.Error('InvalidValue','VESkey cannot be empty');
-			return vi.shareWith([me],v,false).then(function() {
-			    return self.elevateAuth(optns);
+                        let extp = ext[0].externalId.match(/^(.+?)(\!.*)?$/) || [];
+			return vi.shareWith([extp[2] ? {domain: ext[0].domain, externalId: extp[1]} : me],v,false).then(function() {
+			    return (extp[2] ? undefined : self.elevateAuth(optns));
 			}).then(function(optns) {
 			    return k.post(undefined, undefined, optns).then(function(post) {
 				return k.setField('id', post.id, false).then(function() {
