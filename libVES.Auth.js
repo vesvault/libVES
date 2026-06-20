@@ -17,13 +17,18 @@
  * (c) 2021 VESvault Corp
  * Jim Zubov <jz@vesvault.com>
  *
- * GNU General Public License v3
- * You may opt to use, copy, modify, merge, publish, distribute and/or sell
- * copies of the Software, and permit persons to whom the Software is
- * furnished to do so, under the terms of the COPYING file.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
- * KIND, either express or implied.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License in the accompanying LICENSE
+ * file, or at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied.  See the License for the specific language governing
+ * permissions and limitations under the License.
  *
  * @title libVES
  * @dev Send X-VES-Authorization: header to the external HTTPS server as a
@@ -56,19 +61,14 @@ libVES.Auth.prototype.getToken = function() {
 
 libVES.Auth.prototype.getData = function(url, type) {
     return this.getToken().then(function(tkn) {
-	return new Promise(function(resolve, reject) {
-	    var xhr = new XMLHttpRequest();
-	    xhr.open('GET', url);
-	    if (type) xhr.responseType = type;
-	    xhr.onreadystatechange = function() {
-		switch(xhr.readyState) {
-		    case 4:
-			if (xhr.status == 200) resolve(xhr.response);
-			else reject({code: xhr.status, message: xhr.statusText});
-		}
-	    };
-	    xhr.setRequestHeader('X-VES-Authorization', tkn);
-	    xhr.send();
+	return fetch(url, {headers: {'X-VES-Authorization': tkn}}).then(function(res) {
+	    if (res.status != 200) throw {code: res.status, message: res.statusText};
+	    switch (type) {
+		case 'json': return res.json();
+		case 'arraybuffer': return res.arrayBuffer();
+		case 'blob': return res.blob();
+		default: return res.text();
+	    }
 	});
     });
 };

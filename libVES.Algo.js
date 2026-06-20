@@ -17,13 +17,18 @@
  * (c) 2018 VESvault Corp
  * Jim Zubov <jz@vesvault.com>
  *
- * GNU General Public License v3
- * You may opt to use, copy, modify, merge, publish, distribute and/or sell
- * copies of the Software, and permit persons to whom the Software is
- * furnished to do so, under the terms of the COPYING file.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
- * KIND, either express or implied.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License in the accompanying LICENSE
+ * file, or at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied.  See the License for the specific language governing
+ * permissions and limitations under the License.
  *
  * libVES.Algo.js             libVES: Vault Key algorithms: ECDH, RSA,
  *                                    via crypto.subtle
@@ -155,6 +160,8 @@ libVES.Algo = {
 	},
 	getPublic: function(priv) {
 	    return crypto.subtle.exportKey('jwk',priv).then(function(k) {
+		// {name:'ECDH'} alone is invalid in Node WebCrypto — EcKeyImportParams
+		// requires namedCurve. Browsers were lenient; Node throws TypeError.
 		return crypto.subtle.importKey('jwk',{
 		    crv: k.crv,
 		    ext: true,
@@ -162,7 +169,7 @@ libVES.Algo = {
 		    kty: 'EC',
 		    x: k.x,
 		    y: k.y
-		},{name:'ECDH'},true,[]);
+		},{name:'ECDH', namedCurve: k.crv},true,[]);
 	    });
 	},
 	getKeyOptions: function(key) {
@@ -309,11 +316,43 @@ libVES.Algo = {
 	    else if (typeof(k) == 'object') {
 		if (k.privateKey) return k.privateKey;
 		else if (k.publicKey) return k.publicKey;
+		// OQS keys imported from PEM are bare wasm Key objects, no privateKey/publicKey wrapper
+		else if (k.algo && (k.priv || k.pub)) return k;
 		else throw new libVES.Error('Internal','Unknown key format');
 	    } else return libVES.Util.PEM.import(k,optns);
 	}).then(function(k) {
+	    // OQS keys are plain wasm Key objects with .algo / .priv / .pub — no .algorithm
+	    if (k && k.algo && (k.priv || k.pub)) return libVES.getModule(libVES.Algo,'OQS').then(function(e) {
+		var rs = {engine: e};
+		if (k.priv && k.priv.byteLength) {
+		    rs.privateKey = k;
+		    return e.wasm().then(function(wasm) {
+			var pub = new wasm.Key(k.algo);
+			for (var i in k) if (i != 'priv') pub[i] = k[i];
+			rs.publicKey = pub;
+			return rs;
+		    });
+		}
+		rs.publicKey = k;
+		return rs;
+	    });
 	    switch (k.algorithm.name) {
 		case 'RSA-OAEP': return libVES.getModule(libVES.Algo,'RSA').then(function(e) {
+		    var rs = {engine: e};
+		    switch (k.type) {
+			case 'private':
+			    rs.privateKey = k;
+			    return e.getPublic(k).then(function(pubk) {
+				rs.publicKey = pubk;
+				return rs;
+			    });
+			case 'public':
+			    rs.publicKey = k;
+			    return rs;
+			default: throw new libVES.Error('Internal','Unsupported key type: ' + k.type);
+		    }
+		});
+		case 'ECDH': return libVES.getModule(libVES.Algo,'ECDH').then(function(e) {
 		    var rs = {engine: e};
 		    switch (k.type) {
 			case 'private':
@@ -358,11 +397,11 @@ WasmECDHinit = {
 	return key;
     },
     buf: function(len) {
-	return new Uint8Array(this.asm.memory.buffer, this._WasmECDH_buf, len);
+	return new Uint8Array(this.HEAPU8.buffer, this._WasmECDH_buf, len);
     },
     str: function(ptr) {
 	if (!ptr) return null;
-	var b = new Uint8Array(this.asm.memory.buffer, ptr);
+	var b = new Uint8Array(this.HEAPU8.buffer, ptr);
 	return libVES.Util.ByteArrayToString(b.slice(0, b.indexOf(0)));
     },
     generate: function(key) {

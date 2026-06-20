@@ -17,13 +17,18 @@
  * (c) 2018 VESvault Corp
  * Jim Zubov <jz@vesvault.com>
  *
- * GNU General Public License v3
- * You may opt to use, copy, modify, merge, publish, distribute and/or sell
- * copies of the Software, and permit persons to whom the Software is
- * furnished to do so, under the terms of the COPYING file.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
- * KIND, either express or implied.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License in the accompanying LICENSE
+ * file, or at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied.  See the License for the specific language governing
+ * permissions and limitations under the License.
  *
  * libVES.Delegate.js         libVES: Delegate login via VESvault
  *
@@ -42,6 +47,15 @@ libVES.Delegate = {
 	   + '<iframe style="width: 100%; height: 48px; border: none;" src="{$url}"></iframe>',
     htmlBlockerMsg: 'Looks like your browser is using a popup blocker...',
     name: 'VESvaultDelegate',
+    // Two delivery channels from V back to O:
+    //   - Browser path: V has window.opener and postMessages O directly.
+    //   - App path: V is App-Link-intercepted into the native app, has no
+    //     opener. V Flow-encrypts the auth payload to O's pub and redirects
+    //     to a partner-hosted hook page at O's origin (path from
+    //     app.delegate.hook in O's /ves.json manifest). The hook calls
+    //     libVES.Delegate.hook() which BC-relays the still-encrypted token
+    //     back to O over libVES.Flow's BroadcastChannel, scoped by a random
+    //     `chan` nonce O passed through V to the hook URL.
     login: function(VES,challenge,optns) {
 	if (this.popup) return this.response || Promise.reject(new libVES.Error('InvalidValue','The delegate popup is already open'));
 	if (!challenge) {
@@ -50,36 +64,77 @@ libVES.Delegate = {
 	} catch(e) {}
 	this.VES = VES;
 	var self = this;
+	self._handled = false;
+	self.chan = libVES.Util.ByteArrayToB64W((function() {
+	    var b = new Uint8Array(12);
+	    crypto.getRandomValues(b);
+	    return b;
+	})());
 	return this.response = new Promise(function(resolve,reject) {
 	    self.reject = reject;
 	    self.resolve = resolve;
-	    var url = VES.wwwUrl + 'vv/unlock?via=delegate&url=' + encodeURIComponent(document.location.href) + '&domain=' + encodeURIComponent(VES.domain);
-	    if (optns) for (var k in optns) if (optns[k] != null) url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(optns[k]);
-	    self.setOrigin(url);
-	    self.showOverlay(self.htmlDlg.replace('{$url}',url));
-	    self.retryPopupCalled = 0;
+	    var baseUrl = VES.wwwUrl + (VES.wwwUrl.match(/\/$/) ? '' : '/') + 'vv/unlock?via=delegate'
+		+ '&url=' + encodeURIComponent(document.location.href)
+		+ '&domain=' + encodeURIComponent(VES.domain)
+		+ '&chan=' + encodeURIComponent(self.chan);
+	    if (optns) for (var k in optns) if (optns[k] != null) baseUrl += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(optns[k]);
+	    self.setOrigin(baseUrl);
+	    // Drain any matching stale localStorage entry from a prior tab,
+	    // then listen for late writes (storage event) as a fallback to BC
+	    // for the subscribe-before-open race.
 	    try {
-		document.getElementsByClassName('VESvaultDelegateRetryLnk')[0].onclick = function() {
-		    return !libVES.Delegate.retryPopup(this.href,this);
+		var lsKey = 'libVES.Delegate.' + self.chan;
+		localStorage.removeItem(lsKey);
+		self._storageHandler = function(ev) {
+		    if (ev.key != lsKey || !ev.newValue) return;
+		    try {
+			var d = JSON.parse(ev.newValue);
+			if (d && d.type == 'VESflow.delegate.relay') self.onBC({type: 'VESflow.delegate.relay', chan: self.chan, token: d.token});
+		    } catch (_) {}
 		};
-		document.getElementsByClassName('VESvaultDelegateCancelLnk')[0].onclick = function() {
-		    libVES.Delegate.cancel();
-		    return false;
-		};
-	    } catch(e) {}
-	    if (!self.openPopup(url)) try {
-		document.getElementsByClassName('VESvaultDelegateBlockerMsg')[0].innerHTML = self.htmlBlockerMsg;
-	    } catch(e) {
-		window.alert(self.htmlBlockerMsg);
+		window.addEventListener('storage', self._storageHandler);
+	    } catch (_) {}
+	    // Create Flow instance and subscribe to BC BEFORE opening V so the
+	    // hook's relay can't beat us to it.
+	    self.flow = new libVES.Flow('VES');
+	    if (libVES.Flow.bc) {
+		libVES.Flow.bc();
+		libVES.Flow.subscribe(self.onBC.bind(self));
 	    }
-	    if (!self.listening) {
-		window.addEventListener('message',self.listener.bind(self));
-		window.addEventListener('focus',self.chkCancel.bind(self));
-		window.addEventListener('beforeunload',self.cancel.bind(self));
-		self.listening = true;
-	    }
-	    window.clearInterval(self.popupInterval);
-	    self.popupInterval = window.setInterval(self.chkCancel.bind(self),1000);
+	    // Plant our pub in the V URL fragment as a Flow intro token so V's
+	    // recvToken stores it under O's origin; V can then Flow-encrypt
+	    // the auth payload back to us on the no-opener path.
+	    self.flow.privKey().catch(function() {}).then(function() {
+		return self.flow.addToken(baseUrl).catch(function() { return baseUrl; });
+	    }).then(function(url) {
+		if (self._handled) return;
+		self.showOverlay(self.htmlDlg.replace('{$url}',url));
+		self.retryPopupCalled = 0;
+		try {
+		    document.getElementsByClassName('VESvaultDelegateRetryLnk')[0].onclick = function() {
+			return !libVES.Delegate.retryPopup(this.href,this);
+		    };
+		    document.getElementsByClassName('VESvaultDelegateCancelLnk')[0].onclick = function() {
+			libVES.Delegate.cancel();
+			return false;
+		    };
+		} catch(e) {}
+		if (!self.openPopup(url)) try {
+		    document.getElementsByClassName('VESvaultDelegateBlockerMsg')[0].innerHTML = self.htmlBlockerMsg;
+		} catch(e) {
+		    window.alert(self.htmlBlockerMsg);
+		}
+		if (!self.listening) {
+		    window.addEventListener('message',self.listener.bind(self));
+		    window.addEventListener('beforeunload',self.cancel.bind(self));
+		    self.listening = true;
+		}
+		// popup.closed is intentionally NOT polled here. Cancellation
+		// signals are explicit: a {cancelled: true} postMessage from
+		// the popup's beforeunload handler, or the user clicking the
+		// Cancel link in the overlay. If neither arrives the overlay
+		// stays.
+	    });
 	});
     },
     flow: function(VES, start, optns) {
@@ -111,6 +166,9 @@ libVES.Delegate = {
     setOrigin: function(url) {
 	this.matchOrigin = (function(m) { return m ? m[0] : document.location.protocol + '//' + document.location.host; })(url.match(/^(https\:\/\/[^\/\?\#]+)/));
     },
+    acceptOrigin: function(org) {
+	return org == this.matchOrigin;
+    },
     openPopup: function(url) {
 	return this.popupWindow = window.open(url,this.name,"width=600,height=600,top=100,left=100");
     },
@@ -124,18 +182,40 @@ libVES.Delegate = {
 	return true;
     },
     listener: function(evnt) {
-	if (this.popup && evnt.origin == this.matchOrigin) try {
+	if (this.popup && this.acceptOrigin(evnt.origin)) try {
 	    var msg = JSON.parse(evnt.data);
 	    if (msg.redirect) {
 		document.location.replace(msg.redirect);
-	    } else {
-		this.resolve(this.VES.authorize(msg));
+		return;
 	    }
+	    if (msg.cancelled) {
+		this.cancel();
+		return;
+	    }
+	    this._handled = true;
+	    this.resolve(this.VES.authorize(msg));
 	    this.close();
 	    if (!evnt.source.closed) evnt.source.close();
 	} catch(e) {}
     },
+    onBC: function(d) {
+	if (!this.popup || this._handled) return;
+	if (!d || d.type != 'VESflow.delegate.relay' || d.chan != this.chan || !d.token) return;
+	this._handled = true;
+	var self = this;
+	this.flow.recvToken(d.token).then(function(msg) {
+	    self.resolve(self.VES.authorize(msg));
+	    self.close();
+	}).catch(function(e) {
+	    self.reject(e);
+	    self.close();
+	});
+    },
     close: function() {
+	if (this._storageHandler) {
+	    try { window.removeEventListener('storage', this._storageHandler); } catch (e) {}
+	    this._storageHandler = null;
+	}
 	if (this.popup) {
 	    if (this.popupWindow) {
 		try {
@@ -143,8 +223,6 @@ libVES.Delegate = {
 		} catch (e) {}
 		this.popupWindow = null;
 	    }
-	    window.clearInterval(this.popupInterval);
-	    this.popupInterval = null;
 	    this.popup.parentNode.removeChild(this.popup);
 	    this.popup = null;
 	    return this.response;
@@ -155,7 +233,35 @@ libVES.Delegate = {
 	if (this.response && this.reject) this.reject(new libVES.Error('Aborted','VESvault login is cancelled'));
 	return rs;
     },
-    chkCancel: function() {
-	if (this.popupWindow && this.popupWindow.closed) this.cancel();
+    // Partner-hosted relay page entry point. The hook page at O's origin is
+    // a ~3-line file that loads libVES and calls this. We parse the
+    // encrypted Flow token from the URL fragment, BC-publish it (keyed by
+    // the chan nonce from the query string) so the original O tab can
+    // decrypt + authorize, mirror to localStorage as a belt-and-braces
+    // fallback, and try to self-close.
+    hook: function() {
+	var qp = new URLSearchParams(location.search);
+	var chan = qp.get('chan') || '';
+	var tk = null;
+	libVES.Flow.parseToken(location.hash, function(k, t) {
+	    if (k != 'VES') return false;
+	    tk = t;
+	    return true;
+	});
+	if (!tk) return libVES.Delegate.hookMessage('Authorization payload missing.');
+	var bc = libVES.Flow.bc();
+	if (bc) try { bc.postMessage({type: 'VESflow.delegate.relay', chan: chan, token: tk}); } catch (e) {}
+	try {
+	    var lsKey = 'libVES.Delegate.' + chan;
+	    localStorage.setItem(lsKey, JSON.stringify({type: 'VESflow.delegate.relay', token: tk, ts: Date.now()}));
+	    setTimeout(function() { try { localStorage.removeItem(lsKey); } catch (e) {} }, 30000);
+	} catch (e) {}
+	try { window.close(); } catch (e) {}
+	setTimeout(function() { libVES.Delegate.hookMessage('Authorization delivered. You can close this window.'); }, 300);
+    },
+    hookMessage: function(text) {
+	try {
+	    document.body.innerHTML = '<div style="font-family:arial,sans-serif;text-align:center;padding:48px 16px;color:#444;max-width:480px;margin:0 auto;">' + text + '</div>';
+	} catch (e) {}
     }
 };

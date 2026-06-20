@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>libVES.js test runner</title>
+<style>
+    body { font-family: monospace; margin: 1em; background: #111; color: #ddd; }
+    h1 { font-size: 1em; color: #ff0; margin: 0 0 0.5em 0; }
+    fieldset { border: 1px solid #444; margin-bottom: 1em; }
+    label { display: inline-block; min-width: 6em; }
+    input, select { background: #222; color: #ddd; border: 1px solid #444; padding: 2px 4px; min-width: 18em; }
+    button { background: #333; color: #fff; border: 1px solid #555; padding: 4px 12px; cursor: pointer; margin-right: 0.4em; }
+    button:disabled { color: #555; cursor: default; }
+    #out { white-space: pre-wrap; }
+    .head { color: #ff0; margin-top: 0.6em; }
+    .pass { color: #5f5; }
+    .fail { color: #f55; }
+    .info { color: #888; }
+    .stat { color: #5cf; margin-top: 0.6em; }
+    .who { color: #fc7; }
+    .hint { color: #888; font-style: italic; }
+</style>
+</head>
+<body>
+<h1>libVES.js test runner</h1>
+
+<fieldset>
+    <legend>App vault</legend>
+    <div><label for="DOM">DOM</label><input id="DOM" value="demo"></div>
+    <div style="margin-top:0.5em"><label for="test">Test</label><select id="test"></select></div>
+    <div style="margin-top:0.5em">
+        <button id="authorize">Authorize primary user</button>
+        <button id="authorize2" style="display:none">Authorize 2nd user</button>
+        <button id="run" disabled>Run</button>
+        <button id="clear">Clear output</button>
+    </div>
+    <div class="info" style="margin-top:0.4em">
+        Authorization runs through VESvault — no VESkey is entered or stored on this page.
+    </div>
+    <div id="hint" class="hint" style="margin-top:0.4em"></div>
+    <div id="who" class="who" style="margin-top:0.4em"></div>
+</fieldset>
+
+<div id="out"></div>
+
+<!-- libVES source files in dependency order. Adjust paths if the lib lives elsewhere. -->
+<script src="../libVES-base.js"></script>
+<script src="../libVES.Util.js"></script>
+<script src="../libVES.Math.js"></script>
+<script src="../libVES.Algo.js"></script>
+<script src="../libVES.Algo.OQS.js"></script>
+<script>
+    // Pull WasmOQS from the same origin as this test page (build host
+    // serves /libVES/ -> /usr/src/libVES/). The lib's default
+    // baseUrl=https://ves.host/pub/ ships a 2023 build that pre-dates
+    // liboqs 0.13 and lacks ML-KEM — overriding here is what makes
+    // 05-keyalgo's ML-KEM-{512,768,1024} cases reach a real KEM.
+    WasmOQSinit.baseUrl = new URL('../WasmOQS/', document.currentScript.baseURI).href;
+</script>
+<script src="../libVES.Cipher.js"></script>
+<script src="../libVES.Auth.js"></script>
+<script src="../libVES.Scramble.js"></script>
+<script src="../libVES.Object.js"></script>
+<script src="../libVES.Vault.js"></script>
+<script src="../libVES.Item.js"></script>
+<script src="../libVES.Delegate.js"></script>
+<script src="../libVES.Recovery.js"></script>
+<script src="../libVES.Watch.js"></script>
+<script src="../libVES.Flow.js"></script>
+<script src="../libVES.KeyStore.js"></script>
+
+<script src="jstest.inc.js"></script>
+<script src="01-item.js"></script>
+<script src="02-share.js"></script>
+<script src="03-anonymous.js"></script>
+<script src="04-domain.js"></script>
+<script src="05-keyalgo.js"></script>
+<script src="06-mlkem-formats.js"></script>
+
+<script>
+(function () {
+    var out = document.getElementById('out');
+    var who = document.getElementById('who');
+    var hint = document.getElementById('hint');
+    var sel = document.getElementById('test');
+    var btnAuth = document.getElementById('authorize');
+    var btnAuth2 = document.getElementById('authorize2');
+    var btnRun = document.getElementById('run');
+    var btnClear = document.getElementById('clear');
+    var domInput = document.getElementById('DOM');
+
+    var state = { ves: null, ves2: null, conf: null };
+
+    var savedDom = localStorage.getItem('vestest.DOM');
+    if (savedDom != null) domInput.value = savedDom;
+
+    // Populate the test dropdown from the registry.
+    function populateTests() {
+        sel.innerHTML = '';
+        var optAll = document.createElement('option');
+        optAll.value = '';
+        optAll.textContent = 'All tests';
+        sel.appendChild(optAll);
+        vestest.registry.forEach(function (e) {
+            var o = document.createElement('option');
+            o.value = e.name;
+            o.textContent = e.name + (e.meta && e.meta.needsVes2 ? '   (needs 2nd user)' : '');
+            sel.appendChild(o);
+        });
+        var savedSel = localStorage.getItem('vestest.test');
+        if (savedSel != null) sel.value = savedSel;
+    }
+    populateTests();
+
+    function selectionNeedsVes2() {
+        if (sel.value === '') {
+            // "All tests" — needed iff any registered test needs ves2.
+            return vestest.registry.some(function (e) { return e.meta && e.meta.needsVes2; });
+        }
+        var e = vestest.find(sel.value);
+        return !!(e && e.meta && e.meta.needsVes2);
+    }
+
+    function browserReporter() {
+        var pass = 0, fail = 0;
+        function line(cls, text) {
+            var d = document.createElement('div');
+            d.className = cls;
+            d.textContent = text;
+            out.appendChild(d);
+        }
+        function report(ev) {
+            switch (ev.type) {
+                case 'head': line('head', ev.info); break;
+                case 'pass': pass++; line('pass', '[PASSED] ' + (ev.step || '')); break;
+                case 'fail':
+                    fail++;
+                    line('fail', '[FAILED] ' + (ev.step || ''));
+                    if (ev.error) line('fail', '  ' + (ev.error.stack || ev.error.message || ev.error));
+                    break;
+                case 'info': line('info', ev.info || ''); break;
+            }
+        }
+        report.stats = function () {
+            line('stat', 'Passed: ' + pass);
+            line('stat', 'Failed: ' + fail);
+        };
+        report.counts = function () { return { pass: pass, fail: fail }; };
+        return report;
+    }
+
+    function updateUI() {
+        var needs2 = selectionNeedsVes2();
+        btnAuth2.style.display = needs2 ? '' : 'none';
+
+        var parts = [];
+        if (state.ves) parts.push('primary: ' + state.ves.externalId);
+        if (state.ves2) parts.push('2nd: ' + state.ves2.externalId);
+        who.textContent = parts.join('   |   ');
+
+        if (!state.ves) {
+            hint.textContent = 'Authorize the primary user to start.';
+            btnAuth2.disabled = true;
+            btnRun.disabled = true;
+        } else if (needs2 && !state.ves2) {
+            hint.textContent = 'This test needs a 2nd user — click "Authorize 2nd user".';
+            btnAuth2.disabled = false;
+            btnRun.disabled = true;
+        } else {
+            hint.textContent = '';
+            btnAuth2.disabled = false;
+            btnRun.disabled = false;
+        }
+    }
+
+    function readConf() {
+        var conf = {};
+        var dom = domInput.value;
+        localStorage.setItem('vestest.DOM', dom);
+        if (dom) conf.DOM = dom;
+        return conf;
+    }
+
+    btnAuth.onclick = function () {
+        var conf = readConf();
+        if (!conf.DOM) { alert('DOM is required'); return; }
+        out.innerHTML = '';
+        var report = browserReporter();
+        var ves = new libVES({ domain: conf.DOM });
+        report({ type: 'info', info: 'Awaiting primary VESvault authorization…' });
+        ves.delegate().then(function () {
+            conf.EMAIL = ves.externalId;
+            state.ves = ves;
+            state.conf = conf;
+            report({ type: 'info', info: 'Authorized as ' + ves.externalId });
+            updateUI();
+        }).catch(function (e) {
+            report({ type: 'fail', step: 'authorize', error: e });
+            updateUI();
+        });
+    };
+
+    btnAuth2.onclick = function () {
+        if (!state.ves) return;
+        var report = browserReporter();
+        var ves2 = new libVES({ domain: state.conf.DOM });
+        report({ type: 'info', info: 'Awaiting 2nd VESvault authorization…' });
+        ves2.delegate().then(function () {
+            state.conf.EMAIL2 = ves2.externalId;
+            state.ves2 = ves2;
+            report({ type: 'info', info: '2nd user authorized as ' + ves2.externalId });
+            updateUI();
+        }).catch(function (e) {
+            report({ type: 'fail', step: 'authorize 2nd user', error: e });
+            updateUI();
+        });
+    };
+
+    btnRun.onclick = function () {
+        if (!state.ves) return;
+        out.innerHTML = '';
+        vestest.fillConf(state.conf);
+        var report = browserReporter();
+        var names = sel.value ? [sel.value] : null;
+        localStorage.setItem('vestest.test', sel.value);
+        vestest.runSelected(names, state.conf, state.ves, report, state.ves2).then(function () {
+            report.stats();
+        });
+    };
+
+    btnClear.onclick = function () { out.innerHTML = ''; };
+
+    sel.onchange = updateUI;
+    updateUI();
+})();
+</script>
+</body>
+</html>

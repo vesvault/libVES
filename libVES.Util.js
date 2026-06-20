@@ -17,13 +17,18 @@
  * (c) 2018 VESvault Corp
  * Jim Zubov <jz@vesvault.com>
  *
- * GNU General Public License v3
- * You may opt to use, copy, modify, merge, publish, distribute and/or sell
- * copies of the Software, and permit persons to whom the Software is
- * furnished to do so, under the terms of the COPYING file.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
- * KIND, either express or implied.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License in the accompanying LICENSE
+ * file, or at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied.  See the License for the specific language governing
+ * permissions and limitations under the License.
  *
  * libVES.Util.js             libVES: Internal functions: ASN, PEM, PKCSx etc
  *
@@ -282,7 +287,6 @@ libVES.Util = {
 	    if (typeof(asn[0]) == 'number') {
 		var asn2 = libVES.Util.ASN1.decode(asn[2])[0];
 		var pub = libVES.Util.ASN1.decode(asn2[2]);
-		console.log('pub', pub);
 		if (pub) return callbk(pub[0].slice(1), asn2[1], pub[0][0]);
 		else callbk(null, asn2[1]);
 	    } else return callbk(asn[1].slice(1), null, asn[1][0]);
@@ -315,9 +319,14 @@ libVES.Util = {
     },
     PKCS1: {
 	import: function(args,chain,optns) {
+	    // Hash must match libVES.Algo.RSA.generate / getPublic, which use
+	    // SHA-256. The old SHA-1 here made acquire().getPublic() trip on
+	    // "JWK alg does not match the requested algorithm" because the
+	    // imported priv had alg='RSA-OAEP' (SHA-1) while getPublic re-imports
+	    // as 'RSA-OAEP-256'.
 	    return chain('container',optns).then(function(der) {
-		return crypto.subtle.importKey('spki',der,{name:'RSA-OAEP', hash:'SHA-1'},true,['encrypt']).catch(function(e) {
-		    return crypto.subtle.importKey('pkcs8',der,{name:'RSA-OAEP', hash:'SHA-1'},true,['decrypt']);
+		return crypto.subtle.importKey('spki',der,{name:'RSA-OAEP', hash:'SHA-256'},true,['encrypt']).catch(function(e) {
+		    return crypto.subtle.importKey('pkcs8',der,{name:'RSA-OAEP', hash:'SHA-256'},true,['decrypt']);
 		});
 	    });
 	},

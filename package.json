@@ -1,0 +1,55 @@
+{
+  "name": "libves",
+  "version": "3.0.5",
+  "description": "Recoverable end-to-end encryption for browser and Node — key management, sharing, and key recovery without exposing keys or plaintext",
+  "main": "libVES.node.js",
+  "browser": "libVES.js",
+  "scripts": {
+    "build": "node build.js",
+    "build:min": "node build.js --minify",
+    "prepare": "node build.js",
+    "test": "echo \"No test defined\" && exit 1"
+  },
+  "files": [
+    "libVES.js",
+    "libVES.node.js",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "doc/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vesvault/libVES.git"
+  },
+  "keywords": [
+    "encryption",
+    "end-to-end",
+    "e2e",
+    "e2ee",
+    "at-rest",
+    "key-management",
+    "key-recovery",
+    "recoverable",
+    "sharing",
+    "realtime",
+    "cryptography",
+    "post-quantum",
+    "mlkem",
+    "browser",
+    "web-crypto",
+    "nodejs",
+    "pki",
+    "VESvault",
+    "VES"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "jz@vesvault.com",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/vesvault/libVES/issues"
+  },
+  "homepage": "https://ves.host/"
+}

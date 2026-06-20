@@ -1,5 +1,5 @@
 
 all:
-	./Makefile.pl
-	make -C WasmOQS/
-	make -C WasmECDH/
+	node build.js
+	$(MAKE) -C WasmOQS/
+	$(MAKE) -C WasmECDH/

@@ -17,13 +17,18 @@
  * (c) 2018 VESvault Corp
  * Jim Zubov <jz@vesvault.com>
  *
- * GNU General Public License v3
- * You may opt to use, copy, modify, merge, publish, distribute and/or sell
- * copies of the Software, and permit persons to whom the Software is
- * furnished to do so, under the terms of the COPYING file.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
- * KIND, either express or implied.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License in the accompanying LICENSE
+ * file, or at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied.  See the License for the specific language governing
+ * permissions and limitations under the License.
  *
  * libVES-base.js             libVES: Main file
  *
@@ -57,45 +62,28 @@ libVES.prototype = {
     request: function(method,uri,body,optns) {
 	var self = this;
 	if (!optns) optns = {};
-	return new Promise(function(resolve,reject) {
-	    var xhr = new XMLHttpRequest();
-	    xhr.open(method, (uri.match(/^https\:/) ? uri : this.apiUrl + uri));
-	    if (optns.abortFn) optns.abortFn(function() {
-		return xhr.abort();
-	    });
-	    xhr.onreadystatechange = function() {
-		switch(xhr.readyState) {
-		    case 4:
-			if (xhr.response && typeof(xhr.response) == 'object') {
-			    if (xhr.response.errors) {
-				var errs = xhr.response.errors.map(function(e) {
-				    return new libVES.Error(e.type,e.message,e);
-				});
-				if (errs.length) {
-				    var retry = function(o) { return self.request(method, uri, body, (o || optns)); };
-				    if (optns && optns.onerror) try {
-					resolve(optns.onerror(errs, optns, retry));
-				    } catch (e) {
-					reject(e);
-				    } else if (self.onerror) try {
-					resolve(self.onerror(errs, optns, retry));
-				    } catch (e) {
-					reject(e);
-				    }
-				    else reject(errs[0]);
-				}
-			    }
-			    else resolve(xhr.response.result);
-			} else reject(new libVES.Error('BadResponse','Empty response'));
+	var url = uri.match(/^https\:/) ? uri : this.apiUrl + uri;
+	var headers = {'Accept': 'application/json'};
+	if (body != null) headers['Content-Type'] = 'application/json';
+	if (this.user && optns.password) headers['Authorization'] = 'Basic ' + btoa(this.user + ':' + optns.password);
+	else if (optns.token ?? this.token) headers['Authorization'] = 'Bearer ' + (optns.token ? optns.token : this.token);
+	var ctl = (typeof AbortController != 'undefined') ? new AbortController() : null;
+	if (optns.abortFn) optns.abortFn(function() { if (ctl) ctl.abort(); });
+	return fetch(url, {method: method, headers: headers, body: body, signal: ctl ? ctl.signal : undefined}).then(function(res) {
+	    return res.json().catch(function() { return null; });
+	}).then(function(data) {
+	    if (!data || typeof(data) != 'object') throw new libVES.Error('BadResponse','Empty response');
+	    if (data.errors) {
+		var errs = data.errors.map(function(e) { return new libVES.Error(e.type,e.message,e); });
+		if (errs.length) {
+		    var retry = function(o) { return self.request(method, uri, body, (o || optns)); };
+		    if (optns && optns.onerror) return optns.onerror(errs, optns, retry);
+		    if (self.onerror) return self.onerror(errs, optns, retry);
+		    throw errs[0];
 		}
-	    };
-	    if (body != null) xhr.setRequestHeader('Content-Type','application/json');
-	    xhr.setRequestHeader('Accept','application/json');
-	    if (this.user && optns.password) xhr.setRequestHeader('Authorization','Basic ' + btoa(this.user + ':' + optns.password));
-	    else if (optns.token ?? this.token) xhr.setRequestHeader('Authorization','Bearer ' + (optns.token ? optns.token : this.token));
-	    xhr.responseType = 'json';
-	    xhr.send(body);
-	}.bind(this));
+	    }
+	    return data.result;
+	});
     },
     get: function(uri,fields,optns) {
 	return this.request('GET',this.uriWithFields(uri,fields),null,optns);
@@ -152,6 +140,17 @@ libVES.prototype = {
 	var self = this;
 	return libVES.getModule(libVES,'Delegate').then(function(dlg) {
 	    return dlg.login(self,null,optns).then(function() {
+		return self;
+	    });
+	});
+    },
+    keystore: function(optns) {
+	var self = this;
+	return libVES.getModule(libVES,'KeyStore').then(function(KS) {
+	    var ks = (optns instanceof KS) ? optns
+		: (optns && optns.keystore instanceof KS) ? optns.keystore
+		: new KS(optns || {});
+	    return ks.unlock(self, optns && optns.flags).then(function() {
 		return self;
 	    });
 	});
@@ -597,7 +596,16 @@ libVES.prototype = {
 			k.fieldUpdate = {id: true};
 		    });
 		}).catch(function(e) {
-		    if (!e || e.code != 'Unauthorized') throw e;
+		    // Auth rejection is expected when a user-bound session tries to
+		    // create an anonymous key — the lib swallows it and continues
+		    // with the local key, letting the first share-with op create
+		    // the vault server-side. Walk the wrapped-error chain because
+		    // the path resolver wraps API errors in BadPath when the
+		    // pointed-at field is absent on the new VaultKey.
+		    for (var ec = e; ec; ec = ec.error) {
+			if (ec.code === 'Unauthorized' || ec.code === 'AccessDenied') return;
+		    }
+		    throw e;
 		}).then(function() {
                     self.vaultKey = k.lock().then(function() {
                         return k;

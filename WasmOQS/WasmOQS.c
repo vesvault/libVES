@@ -17,13 +17,18 @@
  * (c) 2018 VESvault Corp
  * Jim Zubov <jz@vesvault.com>
  *
- * GNU General Public License v3
- * You may opt to use, copy, modify, merge, publish, distribute and/or sell
- * copies of the Software, and permit persons to whom the Software is
- * furnished to do so, under the terms of the COPYING file.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
- * KIND, either express or implied.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License in the accompanying LICENSE
+ * file, or at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied.  See the License for the specific language governing
+ * permissions and limitations under the License.
  *
  * WasmOQS.c               libVES: An interface to libOQS post-quantum suite
  *
@@ -33,6 +38,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <oqs/kem.h>
+#include <oqs/oqsconfig.h>
+
+/* OQS_KEM_keypair_derand and kem->length_keypair_seed appear in libOQS 0.13.0. */
+#if defined(OQS_VERSION_MAJOR) && (OQS_VERSION_MAJOR > 0 || OQS_VERSION_MINOR >= 13)
+#define WASMOQS_HAVE_DERAND 1
+#endif
 
 
 struct WasmOQS {
@@ -43,6 +54,9 @@ struct WasmOQS {
 
 EMSCRIPTEN_KEEPALIVE char WasmOQS_secretbuf[128];
 EMSCRIPTEN_KEEPALIVE char WasmOQS_ctextbuf[32640];
+#ifdef WASMOQS_HAVE_DERAND
+EMSCRIPTEN_KEEPALIVE char WasmOQS_seedbuf[256];
+#endif
 
 
 EMSCRIPTEN_KEEPALIVE struct WasmOQS *WasmOQS_new(const char *algo, int priv) {
@@ -68,6 +82,20 @@ EMSCRIPTEN_KEEPALIVE int WasmOQS_generate(struct WasmOQS *oqs) {
     if (!oqs || !oqs->priv || OQS_KEM_keypair(oqs->kem, oqs->pub, oqs->priv) != OQS_SUCCESS) return -1;
     return 0;
 }
+
+#ifdef WASMOQS_HAVE_DERAND
+EMSCRIPTEN_KEEPALIVE int WasmOQS_seedlen(struct WasmOQS *oqs) {
+    if (!oqs || !oqs->kem) return 0;
+    return (int)oqs->kem->length_keypair_seed;
+}
+
+EMSCRIPTEN_KEEPALIVE int WasmOQS_generate_seed(struct WasmOQS *oqs, int seedlen) {
+    if (!oqs || !oqs->priv) return -1;
+    if (seedlen != (int)oqs->kem->length_keypair_seed) return -1;
+    if (OQS_KEM_keypair_derand(oqs->kem, oqs->pub, oqs->priv, (const uint8_t *)WasmOQS_seedbuf) != OQS_SUCCESS) return -1;
+    return 0;
+}
+#endif
 
 EMSCRIPTEN_KEEPALIVE int WasmOQS_encaps(struct WasmOQS *oqs, void *ctext, void *secret) {
     if (!ctext || !secret || OQS_KEM_encaps(oqs->kem, ctext, secret, oqs->pub) == OQS_SUCCESS) return oqs->kem->length_ciphertext;
