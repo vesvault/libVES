@@ -11,9 +11,15 @@
  *   node build.js --out DIR       write outputs to DIR (default: cwd)
  *
  * Outputs:
- *   libVES-<version>.js           script-tag bundle
- *   libVES-<version>.node.js      Node bundle (shims crypto.subtle, XMLHttpRequest)
+ *   libVES-<version>.js           script-tag bundle (OQS sidecar loader inlined; ECDH lazy)
+ *   libVES-<version>.node.js      Node bundle (single-file OQS + ECDH wasm embedded)
  *   libVES-<version>.min.js       minified browser bundle (with --minify)
+ *
+ * Wasm engines (built on the build host with emscripten; see WasmOQS/ and WasmECDH/):
+ *   - browser bundle embeds the OQS *sidecar loader* (WasmOQS.js); the .wasm is fetched
+ *     from WasmOQSinit.baseUrl (ves.host/pub). ECDH stays fully lazy, as in the original.
+ *   - node bundle embeds the *single-file* engines (WasmOQS.single.js + WasmECDH.single.js)
+ *     with the .wasm base64-embedded — self-contained, no network and no `document`.
  */
 
 const fs = require('fs');
@@ -60,7 +66,7 @@ const banner = `/***************************************************************
  *         \\___/              - VESrecovery (TM)
  *
  *
- * (c) 2017 - 2022 VESvault Corp
+ * (c) 2017 - 2026 VESvault Corp
  * Jim Zubov <jz@vesvault.com>
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -99,13 +105,39 @@ for (const f of SRC) {
 }
 body = body.replace(/\/\*[\s\S]*?\*\//g, '');
 
+// Read an emscripten glue file to inline verbatim into a bundle. The glue defines the
+// global (WasmOQS / WasmECDH) that libVES.Algo.*.wasm() detects (so loadWasm is never
+// reached when it's present), so it must NOT pass through the comment stripping above.
+// Built on the build host with emscripten — see the Wasm*/Makefile.
+function readGlue(rel, note) {
+    const p = path.join(ROOT, rel);
+    if (!fs.existsSync(p)) throw new Error('missing ' + rel + ' — build it first on the build host: '
+        + '(cd ' + path.dirname(rel) + ' && emmake make). See ' + path.dirname(rel) + '/Makefile.');
+    return '\n/* ' + rel + ' (' + note + ') */\n' + fs.readFileSync(p, 'utf8').replace(/\r/g, '');
+}
+
+// Browser bundle: inline the OQS *sidecar loader* (WasmOQS.js) — defines the global WasmOQS
+// and fetches WasmOQS.wasm from WasmOQSinit.baseUrl (ves.host/pub). OQS/ML-KEM is the default
+// key algo, so its loader ships eagerly; only the .wasm payload is a sidecar. ECDH stays fully
+// lazy — its loader (WasmECDH.js) is fetched on demand by libVES.Algo.ECDH.wasm(), exactly as
+// in the original code — so it is NOT inlined here.
+const oqsSidecar = readGlue('WasmOQS/WasmOQS.js', 'sidecar loader, fetches .wasm');
+
+// Node bundle: inline the *single-file* engines (.wasm base64-embedded) for BOTH OQS and ECDH.
+// Node has no `document`, so libVES.Util.loadWasm (which injects a <script>) cannot lazy-load a
+// sidecar — the engines must be self-contained: no network, no document.
+const oqsSingle = readGlue('WasmOQS/WasmOQS.single.js', 'SINGLE_FILE, embedded .wasm');
+const ecdhSingle = readGlue('WasmECDH/WasmECDH.single.js', 'SINGLE_FILE, embedded .wasm');
+
 const versionLine = `libVES.version = '${version}';\n`;
-const browser = banner + body + versionLine;
+const browser = banner + oqsSidecar + body + versionLine;
 const nodeBundle = banner
     + "if (typeof crypto === 'undefined') {\n"
     + "    crypto = require('crypto');\n"
     + "    crypto.subtle = (crypto.webcrypto && crypto.webcrypto.subtle) || require('subtle');\n"
     + "}\n"
+    + oqsSingle
+    + ecdhSingle
     + body
     + versionLine
     + "\nmodule.exports = libVES;\n";

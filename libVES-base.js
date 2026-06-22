@@ -14,7 +14,7 @@
  *         \___/              - VESrecovery (TM)
  *
  *
- * (c) 2018 VESvault Corp
+ * (c) 2018 - 2026 VESvault Corp
  * Jim Zubov <jz@vesvault.com>
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -54,8 +54,8 @@ libVES.prototype = {
     apiUrl: 'https://api.ves.host/v1/',
     pollUrl: 'https://poll.ves.host/v1/',
     wwwUrl: 'https://www.vesvault.com/',
-    keyAlgo: 'ECDH',
-    keyOptions: {namedCurve: 'P-521'},
+    keyAlgo: 'OQS',
+    keyOptions: {oqsAlgo: 'ML-KEM-768'},
     textCipher: 'AES256GCMp',
     defaultHash: 'SHA256',
     propagators: null,

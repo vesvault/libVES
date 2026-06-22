@@ -14,7 +14,7 @@
 # *         \___/              - VESrecovery (TM)
 # *
 # *
-# * (c) 2018 - 2023 VESvault Corp
+# * (c) 2018 - 2026 VESvault Corp
 # * Jim Zubov <jz@vesvault.com>
 # *
 # * SPDX-License-Identifier: Apache-2.0
@@ -52,13 +52,21 @@ LIBOQS=/usr/src/liboqs
 
 WASMMOD=WasmOQS
 LDFLAGS=-L$(LIBOQS)/lib -loqs -sMODULARIZE -s EXPORT_NAME="'$(WASMMOD)'" -s EXPORTED_RUNTIME_METHODS='["HEAPU8"]'
+SINGLEFLAGS=-sSINGLE_FILE=1
 CFLAGS=-I$(ROOT)/include -I$(LIBOQS)/include
 EMOBJS=$(ROOT)/WasmOQS.o
 TARGET=$(ROOT)/$(WASMMOD)
 
 
-all:	$(EMOBJS)
+all:	sidecar single
+
+# Sidecar: WasmOQS.js loader + a separate WasmOQS.wasm (lazy-loaded, e.g. from ves.host/pub)
+sidecar:	$(EMOBJS)
 	$(CC) $(LDFLAGS) -o $(TARGET).js $(EMOBJS)
 
+# Single-file: WasmOQS.single.js with the .wasm base64-embedded (self-contained, no sidecar)
+single:	$(EMOBJS)
+	$(CC) $(LDFLAGS) $(SINGLEFLAGS) -o $(TARGET).single.js $(EMOBJS)
+
 clean:
-	rm -f $(EMOBJS) $(TARGET).js $(TARGET).wasm
+	rm -f $(EMOBJS) $(TARGET).js $(TARGET).wasm $(TARGET).single.js

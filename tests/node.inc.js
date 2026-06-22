@@ -1,9 +1,10 @@
 /*
  * tests/node.inc.js — Node-side bootstrap for the libVES JS test suite.
  *
- * Each test file (01-item.js, …) requires this at the top to load libVES
- * sources, set up the WebCrypto / WasmOQS shims, wire libVES.KeyStore to
- * the libVES.c-compatible keydir (so the `ves` CLI and these tests share
+ * Each test file (01-item.js, …) requires this at the top to load the
+ * self-contained node package (libVES.node.js — the OQS + ECDH wasm engines
+ * are base64-embedded, no sidecar .wasm, no document), wire libVES.KeyStore
+ * to the libVES.c-compatible keydir (so the `ves` CLI and these tests share
  * key storage), and register vestest.unlockFn. The top-line require is
  * guarded with `typeof window === 'undefined'`, so the same test files
  * load unchanged into tests/index.html in the browser.
@@ -46,27 +47,17 @@ if (typeof crypto === 'undefined') {
 }
 
 const LIB_DIR = path.resolve(__dirname, '..');
-const SRC = [
-    'libVES-base.js', 'libVES.Util.js', 'libVES.Math.js', 'libVES.Object.js',
-    'libVES.Algo.js', 'libVES.Cipher.js', 'libVES.Scramble.js', 'libVES.Recovery.js',
-    'libVES.Delegate.js', 'libVES.Flow.js', 'libVES.Auth.js', 'libVES.Algo.OQS.js',
-    'libVES.Watch.js', 'libVES.Vault.js', 'libVES.Item.js', 'libVES.KeyStore.js',
-];
-for (const f of SRC) eval.call(global, fs.readFileSync(path.join(LIB_DIR, f), 'utf8'));
 
-// WasmOQS — the browser path in libVES.Util.loadWasm uses
-// document.createElement('script'), which doesn't exist in Node. Pre-load
-// the module via require() and patch WasmOQSinit.locateFile to point at
-// the local .wasm so Emscripten can find it. libVES.Algo.OQS.wasm()'s
-// `typeof(WasmOQS) == 'function'` short-circuit then skips the script tag.
-const wasmDir = path.join(LIB_DIR, 'WasmOQS');
-const wasmJs = path.join(wasmDir, 'WasmOQS.js');
-if (fs.existsSync(wasmJs)) {
-    global.WasmOQS = require(wasmJs).default;
-    if (typeof WasmOQSinit !== 'undefined') {
-        WasmOQSinit.locateFile = (name) => path.join(wasmDir, name);
-    }
-}
+// Load the SHIPPED node package alone — libVES.node.js is the self-contained npm
+// bundle (package.json "main") with the OQS + ECDH wasm engines base64-embedded
+// (single-file). This is exactly what `require('libves')` gives an npm consumer:
+// no individual source files, no sidecar .wasm fetch, no document. Exercising the
+// bundle here also proves it works standalone. Build it first on the build host:
+// `node build.js` (needs the emscripten glue — see WasmOQS/ and WasmECDH/).
+const PKG = path.join(LIB_DIR, 'libVES.node.js');
+if (!fs.existsSync(PKG)) throw new Error('missing ' + PKG
+    + ' — build the node package first: (cd ' + LIB_DIR + ' && node build.js).');
+global.libVES = require(PKG);
 
 eval.call(global, fs.readFileSync(path.join(__dirname, 'jstest.inc.js'), 'utf8'));
 

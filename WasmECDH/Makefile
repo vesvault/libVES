@@ -14,7 +14,7 @@
 # *         \___/              - VESrecovery (TM)
 # *
 # *
-# * (c) 2018 - 2023 VESvault Corp
+# * (c) 2018 - 2026 VESvault Corp
 # * Jim Zubov <jz@vesvault.com>
 # *
 # * SPDX-License-Identifier: Apache-2.0
@@ -68,17 +68,25 @@ WOLFOBJS=$(WOLF)/src/ssl.o \
 
 # Wasm build options
 WASMMOD=WasmECDH
-LDFLAGS=-L$(LIBWOLF) -lwolfssl -sMODULARIZE -s EXPORT_NAME="'$(WASMMOD)'"
+LDFLAGS=-L$(LIBWOLF) -lwolfssl -sMODULARIZE -s EXPORT_NAME="'$(WASMMOD)'" -s EXPORTED_RUNTIME_METHODS='["HEAPU8"]'
+SINGLEFLAGS=-sSINGLE_FILE=1
 CFLAGS=-I$(ROOT)/include -I$(WOLF) -include $(ROOT)/include/wolf_wasm.h
 EMOBJS=$(ROOT)/WasmECDH.o
 TARGET=$(ROOT)/$(WASMMOD)
 
 
-all:	$(EMOBJS) $(WOLFLIBS)
+all:	sidecar single
+
+# Sidecar: WasmECDH.js loader + a separate WasmECDH.wasm (lazy-loaded fallback, e.g. from ves.host/pub)
+sidecar:	$(EMOBJS) $(WOLFLIBS)
 	$(CC) $(LDFLAGS) -o $(TARGET).js $(EMOBJS)
 
+# Single-file: WasmECDH.single.js with the .wasm base64-embedded (self-contained, no sidecar)
+single:	$(EMOBJS) $(WOLFLIBS)
+	$(CC) $(LDFLAGS) $(SINGLEFLAGS) -o $(TARGET).single.js $(EMOBJS)
+
 clean:
-	rm -f $(EMOBJS) $(TARGET).js $(TARGET).wasm
+	rm -f $(EMOBJS) $(TARGET).js $(TARGET).wasm $(TARGET).single.js
 
 
 # WolfSSL partial build targets:

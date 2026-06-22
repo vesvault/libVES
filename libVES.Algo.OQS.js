@@ -14,7 +14,7 @@
  *         \___/              - VESrecovery (TM)
  *
  *
- * (c) 2022 VESvault Corp
+ * (c) 2022 - 2026 VESvault Corp
  * Jim Zubov <jz@vesvault.com>
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -148,7 +148,7 @@ libVES.Algo.OQS = {
 	}
     },
     OID: '1.3.6.1.4.1.53675.3.5',
-    defaultAlgo: 'Kyber768'
+    defaultAlgo: 'ML-KEM-768'
 };
 
 /*

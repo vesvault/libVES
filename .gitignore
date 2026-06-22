@@ -4,5 +4,15 @@
 /libVES.min.js
 /libVES-[0-9]*.js
 
+# Wasm build outputs (built with emscripten in WasmOQS/ and WasmECDH/; never committed)
+/WasmOQS/WasmOQS.js
+/WasmOQS/WasmOQS.wasm
+/WasmOQS/WasmOQS.single.js
+/WasmOQS/*.o
+/WasmECDH/WasmECDH.js
+/WasmECDH/WasmECDH.wasm
+/WasmECDH/WasmECDH.single.js
+/WasmECDH/*.o
+
 # Dependencies
 /node_modules/
