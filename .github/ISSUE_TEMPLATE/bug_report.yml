@@ -1,0 +1,65 @@
+name: Bug report
+description: A reproducible problem in the libVES JavaScript library.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Do not use this form for security
+        vulnerabilities** — follow [SECURITY.md](../security/policy) instead.
+  - type: checkboxes
+    id: not-security
+    attributes:
+      label: Confirmation
+      options:
+        - label: This is not a security/cryptography vulnerability (those go to security@vesvault.com).
+          required: true
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what actually happened.
+      placeholder: A clear description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: A minimal code snippet (browser or Node). Redact any real VESkeys, tokens, or private keys.
+      render: javascript
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The `libves` version (`npm ls libves`), or the libVES commit/tag you built from.
+      placeholder: "libves 3.1.0  —  or commit abc1234"
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - Browser
+        - Node.js
+        - Both
+        - Other (describe below)
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime & delivery details
+      description: Browser + version, or Node version; and how you load it (npm, `<script>` tag / CDN, bundler such as webpack/Vite/esbuild).
+      placeholder: "Node 20.x via npm  —  or Chrome 126, <script> from ves.host"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / console output
+      description: Relevant error output or stack trace.
+      render: shell

@@ -1,0 +1,54 @@
+name: CI
+
+# Lightweight CI for the libVES JavaScript library. It deliberately does NOT run
+# a full `node build.js`, and does NOT run tests/ — neither is possible from
+# public CI:
+#
+#   * The bundle embeds WebAssembly glue (WasmOQS / WasmECDH) built with the
+#     emscripten + liboqs + wolfSSL toolchain. That glue is intentionally never
+#     committed (see .gitignore), so a clean checkout has no bundle inputs.
+#   * tests/ drive the live VES API and need two real, synced VES accounts
+#     (see tests/vestest.conf.example.js), which can't be provisioned here.
+#
+# So this guards the two things public CI *can* check cheaply on every push/PR:
+# that every source module parses on each supported Node version, and that the
+# npm manifest stays valid.
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    name: Syntax check (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [ '18', '20', '22' ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Syntax-check all source modules
+        run: |
+          status=0
+          for f in libVES*.js build.js; do
+            if node --check "$f"; then
+              echo "ok   $f"
+            else
+              echo "FAIL $f"
+              status=1
+            fi
+          done
+          exit $status
+      - name: Validate package.json
+        run: |
+          node -e "const p=require('./package.json'); for (const k of ['name','version','main','browser','license','repository','description']) if (!p[k]) throw new Error('package.json missing '+k); console.log('package.json OK:', p.name, p.version)"

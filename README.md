@@ -16,6 +16,10 @@
 
 # libVES.js
 
+[![CI](https://github.com/vesvault/libVES/actions/workflows/ci.yml/badge.svg)](https://github.com/vesvault/libVES/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/libves)](https://www.npmjs.com/package/libves)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 **End-to-end encryption for the browser and Node — that you can actually recover from.**
 
 The official VESvault JavaScript library. It does client-side end-to-end encryption
@@ -135,7 +139,9 @@ open source under the Apache License 2.0. See current terms and pricing at
 Bug reports and small, focused fixes are welcome via issues and pull requests. Because
 this is security-critical software backed by a hosted service, larger changes — new
 cryptography, API-surface or protocol changes — should **start with an issue** before you
-write code; we can't always merge changes that affect the protocol or the service.
+write code; we can't always merge changes that affect the protocol or the service. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for build, syntax-check, and test details, and our
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 Security issues are different: **please don't open a public issue or PR** — follow
 [SECURITY.md](SECURITY.md).

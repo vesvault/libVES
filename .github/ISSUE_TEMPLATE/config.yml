@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Security vulnerability — do NOT open a public issue
+    url: https://github.com/vesvault/libVES/security/policy
+    about: >-
+      libVES is end-to-end encryption software. Report vulnerabilities privately
+      per SECURITY.md (email security@vesvault.com). Please do not file them here.
+  - name: 📖 Documentation & API reference
+    url: https://ves.host/docs/libVES-subtle
+    about: VES docs and the libVES.subtle JavaScript API reference.
+  - name: 💬 Hosted VESvault service — pricing, terms, domains, accounts
+    url: https://vesvault.com
+    about: Questions about the hosted service rather than the library.
