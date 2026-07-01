@@ -335,7 +335,15 @@ libVES.Algo.OQS.MLKEM = {
     export: function(data, optns) {
 	var spec = this.findSpec(data.algo);
 	if (!spec) return null;
-	if (data.priv) return libVES.Util.PKCS8.encode8(this.exportPriv(spec, data.pub, data.priv), optns);
+	if (data.priv) {
+	    // The outer [1] publicKey is only valid in the unencrypted OneAsymmetricKey
+	    // form. OpenSSL's PKCS8_decrypt (libVES.c) parses the decrypted body with the
+	    // strict PKCS8_PRIV_KEY_INFO template, which has no publicKey field and rejects
+	    // a trailing [1]. Drop pub when encrypting; it's recoverable from the embedded
+	    // ek on import (FIPS 203 §7.3), which is what every loader already does.
+	    var encrypting = !(optns && optns.opentext);
+	    return libVES.Util.PKCS8.encode8(this.exportPriv(spec, encrypting ? null : data.pub, data.priv), optns);
+	}
 	return libVES.Util.PEM.encode(this.exportPub(spec, data.pub), 'PUBLIC KEY');
     },
     // bind(spec) is the per-OID initializer: ASN1.import dispatches via OID.object() which

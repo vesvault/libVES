@@ -1,6 +1,6 @@
 {
   "name": "libves",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Recoverable end-to-end encryption for browser and Node — key management, sharing, and key recovery without exposing keys or plaintext",
   "main": "libVES.node.js",
   "browser": "libVES.js",

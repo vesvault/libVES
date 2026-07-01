@@ -30,7 +30,7 @@
  * implied.  See the License for the specific language governing
  * permissions and limitations under the License.
  *
- * libVES.Scramble.js         libVES: VESrecovery algorithm RDX1.2
+ * libVES.Scramble.js         libVES: VESrecovery scramble algorithms SSS1, RDX1.2
  *
  ***************************************************************************/
 libVES.Scramble = {
@@ -38,7 +38,22 @@ libVES.Scramble = {
 	this.size = x;
     }
 };
+// Default dispatcher used by setShadow (libVES-base.js): GF(256) Shamir (SSS1)
+// for m <= 255 shares, integer RDX1.2 beyond that. An explicit optns.v still
+// forces a specific scheme (resolved upstream in setShadow, honored here too).
 libVES.Scramble.RDX.prototype = {
+    explode: function(sc,ct,optns) {
+	var impl = (optns && optns.v && libVES.Scramble.algo[optns.v]) || (ct <= 255 ? libVES.Scramble.SSS : libVES.Scramble.RDX12);
+	return new impl(this.size).explode(sc,ct,optns);
+    }
+};
+// Integer-domain Shamir (RDX 1.2): retained verbatim for legacy tokens and for
+// the m >= 256 case. RDX1.2 is computationally secure (integer-domain Shamir
+// with AES-CTR chaining), not information-theoretic — sound, just non-standard.
+libVES.Scramble.RDX12 = function(x) {
+    this.size = x;
+};
+libVES.Scramble.RDX12.prototype = {
     tag: 'RDX1.2',
     name: 'RDX 1.2 Shamir',
     getBases: function(n) {
@@ -181,6 +196,118 @@ libVES.Scramble.RDX.prototype = {
 	return f([0]);
     }
 };
+// Textbook Shamir secret sharing over GF(2^8) — the AES field (irreducible poly
+// 0x11b, generator 0x03), wire tag SSS1. Each of the L secret bytes is shared with
+// its own independent degree-(n-1) polynomial evaluated at the same x-coordinates
+// 1..m (the byte-wise variant used by ssss and HashiCorp Vault). No AES chaining:
+// over a real field the secret byte is simply the constant term.
+libVES.Scramble.SSS = function(x) {
+    this.size = x;
+};
+libVES.Scramble.SSS.prototype = {
+    tag: 'SSS1',
+    name: 'Shamir GF(256)',
+    gf: function() {
+	var g = libVES.Scramble.SSS._gf;
+	if (g) return g;
+	var exp = new Uint8Array(512);
+	var log = new Uint8Array(256);
+	for (var a = 1, i = 0; i < 255; i++) {
+	    exp[i] = a;
+	    log[a] = i;
+	    var d = a << 1;
+	    if (d & 0x100) d ^= 0x11b;
+	    a = d ^ a;
+	}
+	for (var j = 255; j < 512; j++) exp[j] = exp[j - 255];
+	return libVES.Scramble.SSS._gf = {exp: exp, log: log};
+    },
+    mul: function(a,b) {
+	if (!a || !b) return 0;
+	var g = this.gf();
+	return g.exp[g.log[a] + g.log[b]];
+    },
+    div: function(a,b) {
+	if (!a) return 0;
+	var g = this.gf();
+	return g.exp[g.log[a] + 255 - g.log[b]];
+    },
+    weights: function(xs,x0) {
+	var w = [];
+	for (var i = 0; i < xs.length; i++) {
+	    var num = 1, den = 1;
+	    for (var l = 0; l < xs.length; l++) if (l != i) {
+		num = this.mul(num,x0 ^ xs[l]);
+		den = this.mul(den,xs[i] ^ xs[l]);
+	    }
+	    w[i] = this.div(num,den);
+	}
+	return w;
+    },
+    combine: function(w,ys,len) {
+	var rs = new Uint8Array(len);
+	for (var j = 0; j < len; j++) {
+	    var acc = 0;
+	    for (var i = 0; i < w.length; i++) acc ^= this.mul(w[i],ys[i][j]);
+	    rs[j] = acc;
+	}
+	return rs;
+    },
+    explode: function(sc,ct,optns) {
+	var self = this;
+	if (ct > 255) return Promise.reject(new libVES.Error('InvalidValue','GF(256) Shamir supports at most 255 shares'));
+	var n = this.size;
+	var L = sc.length;
+	var rnd = new Uint8Array(L * (n - 1));
+	if (n > 1) crypto.getRandomValues(rnd);
+	var rs = [];
+	for (var x = 1; x <= ct; x++) {
+	    var val = new Uint8Array(L);
+	    for (var j = 0; j < L; j++) {
+		var acc = (n > 1) ? rnd[(n - 2) * L + j] : 0;
+		for (var k = n - 2; k >= 1; k--) acc = self.mul(acc,x) ^ rnd[(k - 1) * L + j];
+		val[j] = self.mul(acc,x) ^ sc[j];
+	    }
+	    rs.push({
+		meta: (function(m) {
+		    if (optns) {
+			if (optns.t != null) m.t = optns.t;
+			if (optns.shadow) for (var key in optns.shadow) m[key] = optns.shadow[key];
+		    }
+		    return m;
+		})({
+		    v: self.tag,
+		    n: n,
+		    b: x
+		}),
+		value: val
+	    });
+	}
+	return Promise.resolve(rs);
+    },
+    implode: function(tokens,then,okfn) {
+	var self = this;
+	var n = this.size;
+	if (tokens.length < n) return Promise.reject(new libVES.Error('Internal','Insufficient number of tokens to unscramble'));
+	var xs = [], ys = [];
+	for (var i = 0; i < n; i++) {
+	    xs.push(Number(tokens[i].meta.b));
+	    ys.push(tokens[i].value);
+	}
+	var L = ys[0].length;
+	var rs = Promise.resolve(self.combine(self.weights(xs,0),ys,L));
+	if (then) rs = rs.then(then);
+	if (okfn) rs = rs.then(function(sc) {
+	    for (var i = 0; i < tokens.length; i++) {
+		var ok = i < n || !libVES.Math.cmp(tokens[i].value,self.combine(self.weights(xs,Number(tokens[i].meta.b)),ys,L));
+		okfn(tokens[i],ok,i);
+	    }
+	    return sc;
+	});
+	return rs;
+    }
+};
 libVES.Scramble.algo = {
-    'RDX1.2': libVES.Scramble.RDX
+    'RDX1.2': libVES.Scramble.RDX12,
+    'SSS1': libVES.Scramble.SSS
 };

@@ -47,6 +47,7 @@ if (typeof(libVES) != 'function') function libVES(optns) {
     else throw new libVES.Error('InvalidValue','Required parameters: user || domain');
     this.unlockedKeys = {};
     this.pendingKeys = {};
+    this.attnErrors = [];
 }
 
 libVES.prototype = {
@@ -245,7 +246,9 @@ libVES.prototype = {
 		return cryptoKey;
 	    });
 	}).then(function(ck) {
-	    return self.handleAttn().catch(function() {}).then(function() {
+	    return self.handleAttn().catch(function(e) {
+		self.logAttnError(e);
+	    }).then(function() {
 		return ck;
 	    });
 	});
@@ -854,6 +857,20 @@ libVES.prototype = {
 	    });
 	});
     },
+    attnErrors: null,
+    logAttnError: function(error, vaultKey) {
+	// handleAttn() runs opportunistically inside unlock() and its failures used to be
+	// swallowed silently (VES.unlock: .catch(()=>{})), so a broken recovery/rekey looked
+	// like "the PIN does nothing". Keep unlock resilient, but record every attn failure
+	// here so it is inspectable via VES.attnErrors (and logged) instead of vanishing.
+	if (!this.attnErrors) this.attnErrors = [];
+	var rec = {error: error, at: new Date()};
+	if (vaultKey !== undefined) rec.vaultKey = vaultKey;
+	this.attnErrors.push(rec);
+	if (this.attnErrors.length > 64) this.attnErrors.shift();
+	try { console.error('libVES attn error:', error, vaultKey); } catch (e) {}
+	return rec;
+    },
     getAttn: function() {
 	var self = this;
 	var rs = {};
@@ -876,7 +893,6 @@ libVES.prototype = {
     attnVaultKeys: function(vkeys) {
 	var self = this;
 	return Promise.all(vkeys.map(function(vkey, i) {
-	    console.log('attnVaultKeys:', vkey);
 	    return vkey.getType().then(function(type) {
 		switch (type) {
 		    case 'temp':
@@ -912,6 +928,9 @@ libVES.prototype = {
 			    return rcv.recover();
 			});
 		}
+	    }).catch(function(e) {
+		// Isolate per key: one bad attn key must not abort the rest; kept on VES.attnErrors.
+		return self.logAttnError(e, vkey);
 	    });
 	}));
     },
