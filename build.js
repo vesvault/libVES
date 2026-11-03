@@ -11,19 +11,26 @@
  *   node build.js --out DIR       write outputs to DIR (default: cwd)
  *
  * Outputs:
- *   libVES-<version>.js           script-tag bundle (OQS sidecar loader inlined; ECDH lazy)
+ *   libVES-<version>.js           script-tag bundle (single-file OQS embedded; ECDH lazy, pinned)
  *   libVES-<version>.node.js      Node bundle (single-file OQS + ECDH wasm embedded)
  *   libVES-<version>.min.js       minified browser bundle (with --minify)
+ *   wasm-<version>/WasmECDH.*     the lazy ECDH engine, for ves.host/pub/wasm-<version>/
+ *   libVES-<version>.sri          SRI hashes (sha384) of the above, to publish with the release
  *
  * Wasm engines (built on the build host with emscripten; see WasmOQS/ and WasmECDH/):
- *   - browser bundle embeds the OQS *sidecar loader* (WasmOQS.js); the .wasm is fetched
- *     from WasmOQSinit.baseUrl (ves.host/pub). ECDH stays fully lazy, as in the original.
+ *   - browser bundle embeds the *single-file* OQS engine: ML-KEM is the default algo, so
+ *     the bundle's own SRI hash covers it. It starts with a UTF-8 BOM because emscripten
+ *     embeds the .wasm as a raw-byte string, which decodes correctly only as UTF-8, and a
+ *     BOM overrides the page encoding and any missing charset on the response.
+ *     ECDH stays lazy (WebCrypto fallback only); the bundle carries the sha384 of
+ *     WasmECDH.js/.wasm and a version-stamped baseUrl, and libVES verifies both on load.
  *   - node bundle embeds the *single-file* engines (WasmOQS.single.js + WasmECDH.single.js)
- *     with the .wasm base64-embedded — self-contained, no network and no `document`.
+ *     with the .wasm embedded — self-contained, no network and no `document`.
  */
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const ROOT = __dirname;
 
@@ -116,21 +123,34 @@ function readGlue(rel, note) {
     return '\n/* ' + rel + ' (' + note + ') */\n' + fs.readFileSync(p, 'utf8').replace(/\r/g, '');
 }
 
-// Browser bundle: inline the OQS *sidecar loader* (WasmOQS.js) — defines the global WasmOQS
-// and fetches WasmOQS.wasm from WasmOQSinit.baseUrl (ves.host/pub). OQS/ML-KEM is the default
-// key algo, so its loader ships eagerly; only the .wasm payload is a sidecar. ECDH stays fully
-// lazy — its loader (WasmECDH.js) is fetched on demand by libVES.Algo.ECDH.wasm(), exactly as
-// in the original code — so it is NOT inlined here.
-const oqsSidecar = readGlue('WasmOQS/WasmOQS.js', 'sidecar loader, fetches .wasm');
-
-// Node bundle: inline the *single-file* engines (.wasm base64-embedded) for BOTH OQS and ECDH.
+// Both bundles inline the *single-file* OQS engine (.wasm embedded). OQS/ML-KEM is the default
+// key algo, so the browser needs it anyway, and embedding puts it under the bundle's SRI hash.
 // Node has no `document`, so libVES.Util.loadWasm (which injects a <script>) cannot lazy-load a
-// sidecar — the engines must be self-contained: no network, no document.
+// sidecar there — the node bundle embeds ECDH too: no network, no document.
 const oqsSingle = readGlue('WasmOQS/WasmOQS.single.js', 'SINGLE_FILE, embedded .wasm');
 const ecdhSingle = readGlue('WasmECDH/WasmECDH.single.js', 'SINGLE_FILE, embedded .wasm');
 
+// Browser ECDH stays lazy — libVES.Algo.ECDH.wasm() fetches WasmECDH.js + .wasm on demand. The
+// bundle pins both by hash and points at a directory stamped with this version, so a later
+// release replacing them cannot break this bundle, and a swapped file fails closed.
+function readArtifact(rel) {
+    const p = path.join(ROOT, rel);
+    if (!fs.existsSync(p)) throw new Error('missing ' + rel + ' — build it first on the build host: '
+        + '(cd ' + path.dirname(rel) + ' && emmake make). See ' + path.dirname(rel) + '/Makefile.');
+    return fs.readFileSync(p);
+}
+const sri = (buf) => 'sha384-' + crypto.createHash('sha384').update(buf).digest('base64');
+const wasmDir = `wasm-${version}`;
+const ecdhFiles = {};
+for (const f of ['WasmECDH.js', 'WasmECDH.wasm']) ecdhFiles[f] = readArtifact('WasmECDH/' + f);
+const ecdhPins = {};
+for (const f in ecdhFiles) ecdhPins[f] = sri(ecdhFiles[f]);
+const ecdhPinLines = `WasmECDHinit.baseUrl = 'https://ves.host/pub/${wasmDir}/';\n`
+    + `WasmECDHinit.integrity = ${JSON.stringify(ecdhPins)};\n`;
+
+const BOM = String.fromCharCode(0xFEFF);
 const versionLine = `libVES.version = '${version}';\n`;
-const browser = banner + oqsSidecar + body + versionLine;
+const browser = BOM + banner + oqsSingle + body + ecdhPinLines + versionLine;
 const nodeBundle = banner
     + "if (typeof crypto === 'undefined') {\n"
     + "    crypto = require('crypto');\n"
@@ -157,8 +177,22 @@ write(outPath('.node'), nodeBundle);
 // Stable, unversioned bundles — npm "browser" / "main" entry points
 write(stablePath(''), browser);
 write(stablePath('.node'), nodeBundle);
+// The lazy ECDH engine the browser bundle pins, laid out as it is served from ves.host/pub
+fs.mkdirSync(path.join(opts.outDir, wasmDir), { recursive: true });
+for (const f in ecdhFiles) write(path.join(opts.outDir, wasmDir, f), ecdhFiles[f]);
 
-if (opts.minify) {
+// SRI hashes of the version-stamped files, one "<hash>  <path>" line each, for the release
+// notes and ves.host/pub. The unversioned libVES.js is left out: pinning it breaks on update.
+const sums = [[`libVES-${version}.js`, browser], [`libVES-${version}.node.js`, nodeBundle]];
+for (const f in ecdhFiles) sums.push([`${wasmDir}/${f}`, ecdhFiles[f]]);
+function writeSums() {
+    const lines = sums.map(([f, c]) => `${sri(Buffer.from(c))}  ${f}\n`).join('');
+    write(path.join(opts.outDir, `libVES-${version}.sri`), lines);
+    process.stdout.write(lines);
+}
+
+if (!opts.minify) writeSums();
+else {
     let terser;
     try { terser = require('terser'); }
     catch (e) {
@@ -166,11 +200,15 @@ if (opts.minify) {
         process.exit(1);
     }
     // Keep the leading banner; drop everything else for minify.
-    terser.minify(browser, {
+    // terser drops a leading BOM; the minified file needs one for the same reason.
+    terser.minify(browser.slice(BOM.length), {
         format: { comments: /^\*+\s*$|VESvault|libVES|@version/ },
     }).then((out) => {
         if (out.error) throw out.error;
-        write(outPath('.min'), out.code);
-        write(stablePath('.min'), out.code);
+        const min = BOM + out.code;
+        write(outPath('.min'), min);
+        write(stablePath('.min'), min);
+        sums.push([`libVES-${version}.min.js`, min]);
+        writeSums();
     }).catch((e) => { console.error(e); process.exit(1); });
 }

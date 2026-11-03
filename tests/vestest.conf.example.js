@@ -4,7 +4,20 @@
 //     EMAIL2=user2@domain.com         # optional, only for 02-share / 04-domain
 //     DOM=demo                        # optional, defaults to 'demo'
 //     DOM2=...                        # optional, only for 04-domain — see below
-//     apiUrl=https://api.ves.host/v1/ # optional
+//     apiUrl=https://api.example.test/v1/
+//     pollUrl=https://poll.example.test/v1/
+//     wwwUrl=https://www.example.test/
+//
+// apiUrl is REQUIRED, and the runner refuses to start without it: the tests
+// unlock vaults and write and delete items, and without apiUrl libVES sends
+// all of it to its default, the PRODUCTION API https://api.ves.host/v1/.
+// pollUrl and wwwUrl default to production too (https://poll.ves.host/v1/,
+// https://www.vesvault.com/), so they are required as well unless apiUrl is
+// the production API.
+//
+// To run against PRODUCTION on purpose, name it:
+//     apiUrl=https://api.ves.host/v1/
+// and leave pollUrl and wwwUrl out (or name them too).
 //
 // DOM2 must point at an existing second domain. The JS lib doesn't yet
 // support the libVES.c primary,elevate,save flow that auto-creates a fresh
@@ -24,5 +37,7 @@ module.exports = {
     DOM: 'demo',
     // EMAIL2: 'user2@domain.com',
     // DOM2: 'second-domain',
-    // apiUrl: 'https://api.ves.host/v1/',
+    apiUrl: 'https://api.example.test/v1/',     // required, see above
+    pollUrl: 'https://poll.example.test/v1/',
+    wwwUrl: 'https://www.example.test/',
 };

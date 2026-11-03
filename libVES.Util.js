@@ -116,14 +116,34 @@ libVES.Util = {
         }
         return data;
     },
-    loadWasm: function(src) {
+    loadWasm: function(src, integrity) {
 	return new Promise(function(resolve, reject) {
 	    var sc = document.createElement('script');
 	    sc.async = false;
+	    if (integrity) {
+		sc.integrity = integrity;
+		sc.crossOrigin = 'anonymous';
+	    }
 	    sc.src = src;
 	    sc.onload = resolve;
-	    sc.onerror = reject;
+	    sc.onerror = function(e) {
+		reject(new libVES.Error('Internal', 'Could not load ' + src + (integrity ? ' (network or integrity check)' : ''), {error: e}));
+	    };
 	    document.getElementsByTagName('head')[0].appendChild(sc);
+	});
+    },
+    // Fetch a binary and resolve with its bytes only if they match an SRI-format hash
+    // (sha384-<base64>). SRI covers <script> but not a fetch that feeds WebAssembly.
+    fetchPinned: function(url, integrity) {
+	return fetch(url, {credentials: 'omit'}).then(function(r) {
+	    if (!r.ok) throw new libVES.Error('Internal', 'Could not load ' + url + ' (HTTP ' + r.status + ')');
+	    return r.arrayBuffer();
+	}).then(function(buf) {
+	    return crypto.subtle.digest('SHA-384', buf).then(function(d) {
+		var got = 'sha384-' + libVES.Util.ByteArrayToB64(d);
+		if (got != integrity) throw new libVES.Error('Internal', 'Integrity check failed for ' + url + ' (expected ' + integrity + ', got ' + got + ')');
+		return buf;
+	    });
 	});
     },
     PEM: {

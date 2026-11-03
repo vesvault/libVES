@@ -133,6 +133,42 @@
     };
 
     /*
+     * The tests unlock vaults and write and delete items, so they talk only
+     * to servers the conf names. libVES defaults apiUrl, pollUrl and wwwUrl
+     * (VESlocker, the /api/msg key sync, the VESvault popup) to PRODUCTION:
+     * https://api.ves.host/v1/, https://poll.ves.host/v1/,
+     * https://www.vesvault.com/. So:
+     *   - apiUrl is required;
+     *   - apiUrl set to the production API (the libVES default) is the
+     *     opt-in to production, and pollUrl and wwwUrl may then default;
+     *   - with any other apiUrl, pollUrl and wwwUrl are required too, so a
+     *     run against another server never falls back to production.
+     * Throws if the conf falls short. The runners call it before they build
+     * any libVES instance, so a refused run makes no network request.
+     */
+    vestest.checkConf = function (conf) {
+        var dflt = root.libVES.prototype;
+        if (!conf.apiUrl) throw new Error('vestest: apiUrl is not set. Without it libVES uses its default, '
+            + dflt.apiUrl + ', the PRODUCTION API. Set apiUrl, pollUrl and wwwUrl to the servers to test against, '
+            + 'or set apiUrl=' + dflt.apiUrl + ' to run against production on purpose.');
+        ['pollUrl', 'wwwUrl'].forEach(function (k) {
+            if (!conf[k] && conf.apiUrl !== dflt.apiUrl) throw new Error('vestest: apiUrl is ' + conf.apiUrl
+                + ' but ' + k + ' is not set, and would default to ' + dflt[k] + ', which is PRODUCTION. Set ' + k + ' too.');
+        });
+        return conf;
+    };
+
+    /*
+     * libVES options for a test instance built from the conf: `optns` plus
+     * the conf's apiUrl, pollUrl and wwwUrl, after vestest.checkConf.
+     */
+    vestest.libVESoptns = function (conf, optns) {
+        vestest.checkConf(conf);
+        ['apiUrl', 'pollUrl', 'wwwUrl'].forEach(function (k) { if (conf[k]) optns[k] = conf[k]; });
+        return optns;
+    };
+
+    /*
      * Build an authenticated libVES instance from a flat conf record.
      * External apps use a SECONDARY vault — identified by domain + externalId.
      * (Primary `{user: email}` vaults route through VESvault.com's extra
@@ -140,14 +176,12 @@
      * test.)
      *
      * Unlock is performed via vestest.unlockFn, which the runtime must
-     * register before calling openVES. tests/run.js wires it to a
+     * register before calling openVES. tests/node.inc.js wires it to a
      * libVES.KeyStore (CLI PIN dialog, file-backed key cache); browser
      * callers wire their own (e.g. ves.delegate()-based) flow.
      */
     vestest.openVES = function (conf) {
-        var optns = { domain: conf.DOM, externalId: conf.EMAIL };
-        if (conf.apiUrl) optns.apiUrl = conf.apiUrl;
-        if (conf.pollUrl) optns.pollUrl = conf.pollUrl;
+        var optns = vestest.libVESoptns(conf, { domain: conf.DOM, externalId: conf.EMAIL });
         var ves = new root.libVES(optns);
         if (!vestest.unlockFn) return Promise.reject(new Error('vestest.unlockFn not set — runtime must register an unlock implementation'));
         return Promise.resolve(vestest.unlockFn(ves, conf)).then(function () { return ves; });
@@ -159,9 +193,7 @@
      */
     vestest.openVES2 = function (conf) {
         if (!conf.EMAIL2) return Promise.resolve(null);
-        var optns = { domain: conf.DOM, externalId: conf.EMAIL2 };
-        if (conf.apiUrl) optns.apiUrl = conf.apiUrl;
-        if (conf.pollUrl) optns.pollUrl = conf.pollUrl;
+        var optns = vestest.libVESoptns(conf, { domain: conf.DOM, externalId: conf.EMAIL2 });
         var ves = new root.libVES(optns);
         if (!vestest.unlockFn) return Promise.reject(new Error('vestest.unlockFn not set — runtime must register an unlock implementation'));
         return Promise.resolve(vestest.unlockFn(ves, conf)).then(function () { return ves; });

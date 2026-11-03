@@ -87,14 +87,43 @@ Runnable end-to-end examples live in [`tests/`](tests/) (`01-item.js`, `02-share
 npm install libves
 ```
 
-Or build from source (see below) and load `libVES-<version>.js` with a `<script>` tag.
+Or load a released bundle with a `<script>` tag, pinned by its Subresource Integrity hash:
+
+```html
+<script src="https://ves.host/pub/libVES-<version>.js"
+        integrity="sha384-<hash>"
+        crossorigin="anonymous"></script>
+```
+
+Each release publishes its hashes in the GitHub release notes and at
+`https://ves.host/pub/libVES-<version>.sri`. Take the hash from the release notes: a hash
+fetched from the same server as the file proves nothing if that server is compromised.
+To self-host the file, check it against the published hash first:
+
+```sh
+openssl dgst -sha384 -binary libVES-<version>.js | openssl base64 -A
+```
+
+One hash covers the whole client. The ML-KEM engine is embedded in the bundle. The ECDH
+engine, fetched only when WebCrypto lacks a curve, comes from
+`https://ves.host/pub/wasm-<version>/` and is checked against hashes the bundle carries;
+to self-host it, copy that directory and set `WasmECDHinit.baseUrl` to it.
+
+- Pin a version-stamped file, never the unversioned `libVES.js`.
+- The bundle starts with a UTF-8 byte-order mark, which makes browsers read it as UTF-8
+  whatever the page encoding. Keep it if you re-bundle or minify, or serve the file with
+  `charset=utf-8`.
+- A page with a Content-Security-Policy needs `'wasm-unsafe-eval'` in `script-src`.
+
+Or build from source (see below).
 
 ## Building
 
 - `node build.js` — produces version-stamped `libVES-<version>.js` (browser) and
   `libVES-<version>.node.js` (Node) for CDN/`<script>` delivery, plus stable `libVES.js`
-  and `libVES.node.js` (the npm `browser` / `main` entry points). Cross-platform;
-  `Makefile.bat` and `make all` both call it.
+  and `libVES.node.js` (the npm `browser` / `main` entry points), the lazy ECDH engine
+  laid out as served (`wasm-<version>/`), and `libVES-<version>.sri` with the SRI hash of
+  every version-stamped file. Cross-platform; `Makefile.bat` and `make all` both call it.
 - `node build.js --minify` — also writes `libVES-<version>.min.js` and `libVES.min.js`
   (requires `npm i -D terser`).
 - Requires **Node 18+** (uses the built-in `fetch`).

@@ -40,13 +40,13 @@ vestest.register('04-domain', async function (t) {
     // popup's domain=DOM2 query tells V to run primary,elevate,save,
     // which auto-creates the experimental domain on first auth.
     t.head('Bootstrap DOM2 vault for ' + t.conf.EMAIL + ' (VESvault popup expected)');
-    var dom2VaultEmail = libVES.subtle({ domain: t.conf.DOM2, externalId: t.conf.EMAIL });
+    var dom2VaultEmail = libVES.subtle(vestest.libVESoptns(t.conf, { domain: t.conf.DOM2, externalId: t.conf.EMAIL }));
     await t.run('unlock dom2/' + t.conf.EMAIL, async function () {
         await dom2VaultEmail.unlock();
     });
 
     t.head('Bootstrap DOM2 vault for ' + t.conf.EMAIL2 + ' (VESvault popup expected)');
-    var dom2VaultEmail2 = libVES.subtle({ domain: t.conf.DOM2, externalId: t.conf.EMAIL2 });
+    var dom2VaultEmail2 = libVES.subtle(vestest.libVESoptns(t.conf, { domain: t.conf.DOM2, externalId: t.conf.EMAIL2 }));
     await t.run('unlock dom2/' + t.conf.EMAIL2, async function () {
         await dom2VaultEmail2.unlock();
     });

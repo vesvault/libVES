@@ -75,20 +75,25 @@ EMSCRIPTEN_KEEPALIVE WOLFSSL_EC_KEY *WasmECDH_new(const char *curve) {
     return wolfSSL_EC_KEY_new_by_curve_name(nid);
 }
 
+/* The key keeps its own copies of the point and the scalar, so ours are freed either way */
+
 EMSCRIPTEN_KEEPALIVE int WasmECDH_setpub(WOLFSSL_EC_KEY *key, const unsigned char *pub, size_t len) {
     const WOLFSSL_EC_GROUP *grp = wolfSSL_EC_KEY_get0_group(key);
     WOLFSSL_EC_POINT *pt = wolfSSL_EC_POINT_new(grp);
-    if (!wolfSSL_EC_POINT_oct2point(grp, pt, pub, len, NULL)) {
-	wolfSSL_EC_POINT_free(pt);
-	return 0;
-    }
-    return wolfSSL_EC_KEY_set_public_key(key, pt);
+    int rs;
+    if (!pt) return 0;
+    rs = wolfSSL_EC_POINT_oct2point(grp, pt, pub, len, NULL) && wolfSSL_EC_KEY_set_public_key(key, pt);
+    wolfSSL_EC_POINT_free(pt);
+    return rs;
 }
 
 EMSCRIPTEN_KEEPALIVE int WasmECDH_setpriv(WOLFSSL_EC_KEY *key, const unsigned char *priv, size_t len) {
     WOLFSSL_BIGNUM *bn = wolfSSL_BN_bin2bn(priv, len, NULL);
+    int rs;
     if (!bn) return 0;
-    return wolfSSL_EC_KEY_set_private_key(key, bn);
+    rs = wolfSSL_EC_KEY_set_private_key(key, bn);
+    wolfSSL_BN_free(bn);
+    return rs;
 }
 
 EMSCRIPTEN_KEEPALIVE int WasmECDH_getpub(WOLFSSL_EC_KEY *key) {

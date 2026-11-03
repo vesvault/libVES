@@ -693,7 +693,10 @@ libVES.prototype = {
 	        return Promise.resolve(shareWith || self.getFileItem(fileRef).then(function(vi) {
 		    return vi.getShareList();
 		}).catch(function(e) {
-		    return self.usersToKeys([{domain: VES.domain, externalId: VES.externalId}]);
+		    if (e.code != 'NotFound') throw e;
+		    return self.type == 'secondary' ? self.usersToKeys([{domain: self.domain, externalId: self.externalId}]) : self.me().then(function(me) {
+			return self.usersToKeys([me]);
+		    });
 		})).then(function(shareWith) {
 		    return vaultItem.shareWith(shareWith,value);
 		});

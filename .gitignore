@@ -3,6 +3,8 @@
 /libVES.node.js
 /libVES.min.js
 /libVES-[0-9]*.js
+/libVES-[0-9]*.sri
+/wasm-[0-9]*/
 
 # Wasm build outputs (built with emscripten in WasmOQS/ and WasmECDH/; never committed)
 /WasmOQS/WasmOQS.js

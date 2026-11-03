@@ -20,7 +20,20 @@
  *      EMAIL2=user2@domain.com         # optional, for 02-share / 04-domain
  *      DOM=demo                        # optional, defaults to 'demo'
  *      DOM2=...                        # optional, for 04-domain
- *      apiUrl=https://api.ves.host/v1/ # optional
+ *      apiUrl=https://api.example.test/v1/
+ *      pollUrl=https://poll.example.test/v1/
+ *      wwwUrl=https://www.example.test/
+ *
+ *   apiUrl is REQUIRED: the tests unlock vaults and write and delete
+ *   items, and without apiUrl libVES would send all of it to its default,
+ *   the PRODUCTION API https://api.ves.host/v1/. The runner refuses to
+ *   start without it. pollUrl (event polls) and wwwUrl (VESlocker, the
+ *   /api/msg key sync) default to production as well, so they are required
+ *   too unless apiUrl is the production API. To run against production on
+ *   purpose, name it:
+ *      apiUrl=https://api.ves.host/v1/
+ *   pollUrl and wwwUrl then default to https://poll.ves.host/v1/ and
+ *   https://www.vesvault.com/.
  *
  *   Set VESTEST_CONF to point at a different file. A legacy JS conf
  *   (module.exports = {...}) at $VESTEST_CONF, tests/vestest.conf.js, or
@@ -58,6 +71,11 @@ const PKG = path.join(LIB_DIR, 'libVES.node.js');
 if (!fs.existsSync(PKG)) throw new Error('missing ' + PKG
     + ' — build the node package first: (cd ' + LIB_DIR + ' && node build.js).');
 global.libVES = require(PKG);
+
+// libVES.KeyStore needs VESlocker to open PIN-locked (.lkr) entries, and
+// VESlocker ships separately (https://github.com/vesvault/VESlocker). Point
+// VESLOCKER_JS at its client/VESlocker.js to unlock primary vaults.
+if (process.env.VESLOCKER_JS && typeof VESlocker === 'undefined') global.VESlocker = require(path.resolve(process.env.VESLOCKER_JS));
 
 eval.call(global, fs.readFileSync(path.join(__dirname, 'jstest.inc.js'), 'utf8'));
 
@@ -122,6 +140,7 @@ function makeKeydirStore(rootDir) {
         path.join(rootDir, (domain ? safe(domain) + '^' : '') + safe(extid) + suffix(flags));
 
     return {
+        path: fpath,
         async get(domain, extid, flags) {
             try { return fs.readFileSync(fpath(domain, extid, flags), 'utf8'); }
             catch (e) { return null; }
@@ -138,11 +157,18 @@ function makeKeydirStore(rootDir) {
     };
 }
 
-// Minimal in-memory localStorage shim so VESlocker.js (if ever loaded
-// alongside) doesn't crash on missing global. libVES.KeyStore uses the
-// keydir store above and never touches localStorage.
-function makeMemoryLocalStorage() {
+// Minimal in-memory localStorage shim. libVES.KeyStore keeps its entries in
+// the keydir store above; VESlocker, which it uses for the PIN step, keeps
+// each PIN-locked entry in localStorage under VESlocker_<name>. The KeyStore
+// names a primary VESkey 'VESkey/<email>', which the libVES.c keydir holds as
+// <email>.lkr, so that one key is read from and written to the keydir: a
+// primary vault then unlocks from the same .lkr the `ves` CLI uses.
+function makeMemoryLocalStorage(keydir) {
     const data = {};
+    const lkr = (k) => {
+        const m = keydir && String(k).match(/^VESlocker_VESkey\/([^/]+)$/);
+        return m ? keydir.path(null, m[1], {}) : null;
+    };
     const methods = {
         get length() { return Object.keys(data).length; },
         key(i)        { return Object.keys(data)[i] ?? null; },
@@ -153,8 +179,17 @@ function makeMemoryLocalStorage() {
     };
     const own = (k) => Object.prototype.hasOwnProperty.call(methods, k);
     return new Proxy(methods, {
-        get(t, k)       { return own(k) ? t[k] : data[k]; },
-        set(t, k, v)    { if (own(k)) t[k] = v; else data[k] = String(v); return true; },
+        get(t, k) {
+            const p = lkr(k);
+            if (p) { try { return fs.readFileSync(p, 'utf8'); } catch (e) { return undefined; } }
+            return own(k) ? t[k] : data[k];
+        },
+        set(t, k, v) {
+            const p = lkr(k);
+            if (p) fs.writeFileSync(p, String(v), { mode: 0o600 });
+            else if (own(k)) t[k] = v; else data[k] = String(v);
+            return true;
+        },
         deleteProperty(_, k) { delete data[k]; return true; },
         has(_, k)       { return k in data || own(k); },
         ownKeys()       { return Object.keys(data); },
@@ -236,17 +271,19 @@ async function cliPrompt(ctx) {
 // so keys populated by the `ves` CLI are picked up automatically.
 // ---------------------------------------------------------------------------
 const keydirRoot = process.env.VES_KEYSTORE || path.join(os.homedir(), '.ves');
-global.localStorage = makeMemoryLocalStorage();
+const keydir = makeKeydirStore(keydirRoot);
+global.localStorage = makeMemoryLocalStorage(keydir);
 
 const keystore = new libVES.KeyStore({
     prompt: cliPrompt,
-    store: makeKeydirStore(keydirRoot),
+    store: keydir,
 });
 vestest.unlockFn = (ves) => keystore.unlock(ves);
 
 /*
  * vestest.runFromNode([names]) — entry point for `node 0X-...js` and for the
- * run-all driver below. Reads conf, opens ves (and ves2 if EMAIL2 is set),
+ * run-all driver below. Reads conf, refuses to run unless it names the
+ * servers (vestest.checkConf), opens ves (and ves2 if EMAIL2 is set),
  * runs the named tests (default: every test currently in the registry), and
  * exits with status 0/1/2.
  */
@@ -254,6 +291,7 @@ vestest.runFromNode = function (names) {
     return (async () => {
         const conf = vestest.fillConf(loadConf());
         if (!conf.EMAIL) throw new Error('EMAIL is required in vestest conf');
+        vestest.checkConf(conf);
         const ves = await vestest.openVES(conf);
         const ves2 = await vestest.openVES2(conf);
         const report = vestest.defaultReporter();

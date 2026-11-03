@@ -67,8 +67,11 @@ WOLFOBJS=$(WOLF)/src/ssl.o \
 
 
 # Wasm build options
+# ALLOW_MEMORY_GROWTH: a full heap grows instead of aborting, which would take
+# every ECDH key in the page with it. libVES.Algo.js takes a fresh view of HEAPU8
+# on every call and copies results out, so growth leaves no stale view behind.
 WASMMOD=WasmECDH
-LDFLAGS=-L$(LIBWOLF) -lwolfssl -sMODULARIZE -s EXPORT_NAME="'$(WASMMOD)'" -s EXPORTED_RUNTIME_METHODS='["HEAPU8"]'
+LDFLAGS=-L$(LIBWOLF) -lwolfssl -sMODULARIZE -s EXPORT_NAME="'$(WASMMOD)'" -s EXPORTED_RUNTIME_METHODS='["HEAPU8"]' -sALLOW_MEMORY_GROWTH=1
 SINGLEFLAGS=-sSINGLE_FILE=1
 CFLAGS=-I$(ROOT)/include -I$(WOLF) -include $(ROOT)/include/wolf_wasm.h
 EMOBJS=$(ROOT)/WasmECDH.o

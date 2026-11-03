@@ -27,6 +27,13 @@
 <fieldset>
     <legend>App vault</legend>
     <div><label for="DOM">DOM</label><input id="DOM" value="demo"></div>
+    <div><label for="apiUrl">apiUrl</label><input id="apiUrl" placeholder="required"></div>
+    <div><label for="pollUrl">pollUrl</label><input id="pollUrl"></div>
+    <div><label for="wwwUrl">wwwUrl</label><input id="wwwUrl"></div>
+    <div class="info" style="margin-top:0.4em">
+        apiUrl is required, and pollUrl and wwwUrl too unless apiUrl is the production API.
+        To test against production on purpose, enter apiUrl https://api.ves.host/v1/.
+    </div>
     <div style="margin-top:0.5em"><label for="test">Test</label><select id="test"></select></div>
     <div style="margin-top:0.5em">
         <button id="authorize">Authorize primary user</button>
@@ -88,11 +95,16 @@
     var btnRun = document.getElementById('run');
     var btnClear = document.getElementById('clear');
     var domInput = document.getElementById('DOM');
+    var URL_KEYS = ['apiUrl', 'pollUrl', 'wwwUrl'];
 
     var state = { ves: null, ves2: null, conf: null };
 
     var savedDom = localStorage.getItem('vestest.DOM');
     if (savedDom != null) domInput.value = savedDom;
+    URL_KEYS.forEach(function (k) {
+        var saved = localStorage.getItem('vestest.' + k);
+        if (saved != null) document.getElementById(k).value = saved;
+    });
 
     // Populate the test dropdown from the registry.
     function populateTests() {
@@ -178,6 +190,11 @@
         var dom = domInput.value;
         localStorage.setItem('vestest.DOM', dom);
         if (dom) conf.DOM = dom;
+        URL_KEYS.forEach(function (k) {
+            var v = document.getElementById(k).value.trim();
+            localStorage.setItem('vestest.' + k, v);
+            if (v) conf[k] = v;
+        });
         return conf;
     }
 
@@ -186,7 +203,12 @@
         if (!conf.DOM) { alert('DOM is required'); return; }
         out.innerHTML = '';
         var report = browserReporter();
-        var ves = new libVES({ domain: conf.DOM });
+        // Refuse before any libVES instance exists unless the conf names
+        // its servers: the libVES defaults are production.
+        var optns;
+        try { optns = vestest.libVESoptns(conf, { domain: conf.DOM }); }
+        catch (e) { report({ type: 'fail', step: 'conf', error: e.message }); updateUI(); return; }
+        var ves = new libVES(optns);
         report({ type: 'info', info: 'Awaiting primary VESvault authorization…' });
         ves.delegate().then(function () {
             conf.EMAIL = ves.externalId;
@@ -203,7 +225,7 @@
     btnAuth2.onclick = function () {
         if (!state.ves) return;
         var report = browserReporter();
-        var ves2 = new libVES({ domain: state.conf.DOM });
+        var ves2 = new libVES(vestest.libVESoptns(state.conf, { domain: state.conf.DOM }));
         report({ type: 'info', info: 'Awaiting 2nd VESvault authorization…' });
         ves2.delegate().then(function () {
             state.conf.EMAIL2 = ves2.externalId;

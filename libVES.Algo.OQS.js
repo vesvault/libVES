@@ -112,7 +112,7 @@ libVES.Algo.OQS = {
 	});
     },
     getKeyOptions: function(key) {
-	return {oqsAlgo: k.algo};
+	return {oqsAlgo: key.algo};
     },
     getMethods: function() {
 	return this.wasm().then(function(wasm) {

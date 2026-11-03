@@ -75,6 +75,7 @@ libVES.Recovery.prototype = {
 							    });
 							} else {
 							    frnd.user = u;
+							    (frnd.vaultKeys || (frnd.vaultKeys = [])).push(vk);
 							    frnds[uid] = frnd;
 							}
 						    });
@@ -198,6 +199,29 @@ libVES.Recovery.prototype = {
     },
     revoke: function() {
 	return this._assist(false);
+    },
+    refuse: function() {
+	var self = this;
+	return this.getMyToken().then(function(tkn) {
+	    return Promise.all(tkn.vaultKeys.map(function(vk) {
+		return vk.getId();
+	    })).then(function(kids) {
+		return self.vaultKey.VES.elevateAuth().catch(function(e) {
+		    return undefined;
+		}).then(function(optns) {
+		    tkn.vaultItem.setField('vaultEntries', kids.map(function(kid) {
+			return {vaultKey: {id: kid}, '$op': 'delete'};
+		    }));
+		    return tkn.vaultItem.post(undefined, undefined, optns).then(function() {
+			self.tokens = undefined;
+			self.vaultKey.vaultItems = undefined;
+			return true;
+		    }).finally(function() {
+			delete(tkn.vaultItem.vaultEntries);
+		    });
+		});
+	    });
+	});
     },
     unlock: function() {
 	var self = this;

@@ -42,8 +42,12 @@ libVES.Algo = {
 	    var b = new Uint8Array(buf);
 	    var data = libVES.Util.ASN1.decode(b);
 	    if (!data || data.length < 2) throw new libVES.Error('InvalidValue','Error parsing ECIES: Invalid ciphertext?');
-	    return libVES.Util.ASN1.import(b.slice(0,b.byteLength - data[1].byteLength),{decoded:data[0]}).then(function(eKey) {
-		return libVES.Algo.ECDH.cipher(k,eKey).then(function(ci) {
+	    var der = b.slice(0,b.byteLength - data[1].byteLength);
+	    // a wasm private key needs a wasm ephemeral, even on a curve WebCrypto knows
+	    return ((k instanceof CryptoKey) ? libVES.Util.ASN1.import(der,{decoded:data[0]}) : libVES.Algo.ECDH.importWasm(k.curve, der)).then(function(eKey) {
+		return libVES.Algo.ECDH.cipher(k,eKey).finally(function() {
+		    return libVES.Algo.ECDH.freeWasm(eKey);
+		}).then(function(ci) {
 		    return ci.decrypt(data[1],true).catch(function(e) {
 			if (e instanceof libVES.Error) throw e;
 			throw new libVES.Error('InvalidValue','Error decrypting ECIES payload: Invalid ciphertext?',{error:e});
@@ -77,6 +81,9 @@ libVES.Algo = {
 		}).catch(function(e) {
 		    if (e instanceof libVES.Error) throw e;
 		    throw new libVES.Error('InvalidValue','Error generating ECIES DH cipher',{error:e});
+		}).finally(function() {
+		    // the ephemeral's publicKey shares the privateKey's wasm key
+		    return libVES.Algo.ECDH.freeWasm(eKey.privateKey);
 		});
 	    });
 	},
@@ -90,6 +97,12 @@ libVES.Algo = {
 		var k = wasm.init(pub.curve);
 		wasm.generate(k);
 		return wasm.privpub(k);
+	    });
+	},
+	// only for a wasm key made and used up within one call: never a CryptoKey, another engine's key, or a caller's key
+	freeWasm: function(k) {
+	    if (k instanceof WasmECDHinit.Key) return this.wasm().then(function(wasm) {
+		wasm.free(k);
 	    });
 	},
 	derive: function(priv, pub) {
@@ -115,6 +128,11 @@ libVES.Algo = {
 	    'P-256': 32,
 	    'P-384': 48,
 	    'P-521': 66
+	},
+	curveAliases: {
+	    'prime256v1': 'P-256',
+	    'secp384r1': 'P-384',
+	    'secp521r1': 'P-521'
 	},
 	import: function(data,optns) {
 	    return libVES.Util.PEM.import(data,optns);
@@ -149,6 +167,7 @@ libVES.Algo = {
 	generate: function(optns) {
 	    var op = {name: 'ECDH', namedCurve: this.defaultCurve};
 	    if (optns) for (var k in optns) op[k] = optns[k];
+	    if (this.curveAliases[op.namedCurve]) op.namedCurve = this.curveAliases[op.namedCurve];
 	    return crypto.subtle.generateKey(op, true, ['deriveKey', 'deriveBits']).catch(function(e) {
 		console.log('ECDH generateKey failed, trying wasm...', e, op);
 		return libVES.Algo.ECDH.wasm().then(function(wasm) {
@@ -176,15 +195,20 @@ libVES.Algo = {
 	    if (key instanceof CryptoKey) return crypto.subtle.exportKey('jwk', key).then(function(k) {
 		return {namedCurve: k.crv};
 	    });
-	    return {namedCurve: k.curve};
+	    return {namedCurve: key.curve};
 	},
 	asn1hdr: function(oid) {
 	    return [new libVES.Util.OID(this.OID), new libVES.Util.OID(oid)];
 	},
 	wasm: function() {
+	    var pins = WasmECDHinit.integrity || {};
 	    if (!this.wasmP) this.wasmP = (typeof(WasmECDH) == 'function' ? Promise.resolve()
-		: libVES.Util.loadWasm(WasmECDHinit.baseUrl + 'WasmECDH.js')
+		: libVES.Util.loadWasm(WasmECDHinit.baseUrl + 'WasmECDH.js', pins['WasmECDH.js'])
 	    ).then(function() {
+		if (pins['WasmECDH.wasm'] && !WasmECDHinit.wasmBinary) return libVES.Util.fetchPinned(WasmECDHinit.locateFile('WasmECDH.wasm'), pins['WasmECDH.wasm']).then(function(buf) {
+		    WasmECDHinit.wasmBinary = buf;
+		});
+	    }).then(function() {
 		return WasmECDH(WasmECDHinit);
 	    });
 	    return this.wasmP;
@@ -194,8 +218,11 @@ libVES.Algo = {
 		return libVES.Util.Key.fromDER(der, function(pub, priv, pubBits) {
 		    var k = wasm.init(curve);
 		    if (!k) return null;
-		    if (pub) wasm.setpub(k, pub);
-		    if (priv) wasm.setpriv(k, priv);
+		    // a key the engine refuses stays unset, and derive() would give a constant secret
+		    if ((pub && !wasm.setpub(k, pub)) || (priv && !wasm.setpriv(k, priv))) {
+			wasm.free(k);
+			throw new libVES.Error('InvalidValue', 'WasmECDH refused the EC key (not a point on ' + k.curve + '?)');
+		    }
 		    return k;
 		});
 	    });
@@ -203,7 +230,9 @@ libVES.Algo = {
 	getMethods: function() {
 	    var crvs = ['P-256', 'P-384', 'P-521'];
 	    return this.wasm().then(function(wasm) {
-		return crvs.concat(wasm.getcurves());
+		return crvs.concat(wasm.getcurves().filter(function(crv) {
+		    return !libVES.Algo.ECDH.curveAliases[crv];
+		}));
 	    }).catch(function(e) {
 		return crvs;
 	    }).then(function(crvs) {
@@ -318,6 +347,7 @@ libVES.Algo = {
 		else if (k.publicKey) return k.publicKey;
 		// OQS keys imported from PEM are bare wasm Key objects, no privateKey/publicKey wrapper
 		else if (k.algo && (k.priv || k.pub)) return k;
+		else if (k instanceof WasmECDHinit.Key) return k;
 		else throw new libVES.Error('Internal','Unknown key format');
 	    } else return libVES.Util.PEM.import(k,optns);
 	}).then(function(k) {
@@ -335,6 +365,15 @@ libVES.Algo = {
 		}
 		rs.publicKey = k;
 		return rs;
+	    });
+	    // wasm ECDH keys have no .algorithm either; a key pair comes in as its privateKey
+	    if (k instanceof WasmECDHinit.Key) return libVES.getModule(libVES.Algo,'ECDH').then(function(e) {
+		if (!k.private) return {engine: e, publicKey: k};
+		return e.wasm().then(function(wasm) {
+		    var rs = wasm.privpub(k);
+		    rs.engine = e;
+		    return rs;
+		});
 	    });
 	    switch (k.algorithm.name) {
 		case 'RSA-OAEP': return libVES.getModule(libVES.Algo,'RSA').then(function(e) {
@@ -455,6 +494,7 @@ WasmECDHinit = {
     },
     free: function(key) {
 	this._WasmECDH_free(key.ptr);
+	delete(key.ptr);
     },
     getcurves: function() {
 	var lst = this._WasmECDH_listinit(1024);
@@ -471,5 +511,8 @@ WasmECDHinit = {
     locateFile: function(file) {
        return this.baseUrl + file;
     },
-    baseUrl: 'https://ves.host/pub/'
+    baseUrl: 'https://ves.host/pub/',
+    // {'WasmECDH.js': 'sha384-...', 'WasmECDH.wasm': 'sha384-...'}; build.js fills it in the
+    // browser bundle, along with a version-stamped baseUrl, so a stale or tampered file fails closed.
+    integrity: null
 };
