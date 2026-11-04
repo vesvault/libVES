@@ -37,33 +37,36 @@
 # > emmake make
 
 
+
 # Path to the source directory
 ROOT=$(shell pwd)
 
 
-# Path to the wolfssl source code
-# https://github.com/open-quantum-safe/liboqs
-# The wolfssl project has to be EITHER built with emscripten prior to
-# invoking this makefile, OR the partial build below will be invoked.
-# In the latter case, set LIBWOLF to the traget path for libwolfssl.a
-WOLF=/usr/src/wolfssl
-LIBWOLF=$(WOLF)/src/.libs
-
-
-# WolfSSL partial build settings.
-# Note - the set of files and options MAY change in future WolfSSL
-# versions.
-WOLFLIBS=$(LIBWOLF)/libwolfssl.a
-WOLFOBJS=$(WOLF)/src/ssl.o \
-    $(WOLF)/wolfcrypt/src/ecc.o \
-    $(WOLF)/wolfcrypt/src/memory.o \
-    $(WOLF)/wolfcrypt/src/sp_int.o \
-    $(WOLF)/wolfcrypt/src/wc_port.o \
-    $(WOLF)/wolfcrypt/src/random.o \
-    $(WOLF)/wolfcrypt/src/wolfmath.o \
-    $(WOLF)/wolfcrypt/src/sha256.o \
-    $(WOLF)/wolfcrypt/src/logging.o \
-    $(WOLF)/wolfcrypt/src/asn.o
+# Path to OpenSSL's libcrypto, built for wasm with emscripten before invoking
+# this makefile: $(OSSL)/libcrypto.a and $(OSSL)/include. The release build
+# uses OpenSSL 3.5.9 (the 3.5 LTS line), configured as:
+# > git clone --depth 1 --branch openssl-3.5.9 https://github.com/openssl/openssl.git
+# > cd openssl
+# > emconfigure ./Configure linux-generic32 no-asm no-threads no-shared no-dso \
+#       no-engine no-module no-legacy no-sock no-ui-console no-tests no-apps \
+#       no-docs no-afalgeng no-async no-secure-memory no-autoload-config \
+#       no-filenames no-err no-stdio no-autoalginit no-autoerrinit \
+#       no-aria no-argon2 no-bf no-blake2 no-camellia no-cast no-chacha no-cmac \
+#       no-cmp no-cms no-comp no-ct no-des no-dgram no-dh no-dsa no-ecdsa no-ecx \
+#       no-gost no-http no-idea no-md4 no-mdc2 no-ml-dsa no-ml-kem no-ocb \
+#       no-ocsp no-poly1305 no-quic no-rc2 no-rc4 no-rfc3779 no-rmd160 \
+#       no-scrypt no-seed no-siphash no-siv no-slh-dsa no-sm4 no-srp no-ts \
+#       no-whirlpool no-ssl no-tls no-dtls \
+#       --with-rand-seed=getrandom CC=emcc AR=emar RANLIB=emranlib -Oz -flto \
+#       -ffile-prefix-map=$PWD=/src/openssl -fmacro-prefix-map=$PWD=/src/openssl
+# > sed -i 's|^CROSS_COMPILE=.*|CROSS_COMPILE=|' Makefile
+# > emmake make build_generated libcrypto.a
+# Everything the engine does not use is left out: the default provider
+# otherwise links every algorithm OpenSSL has (1.6 MB of wasm against 760 KB).
+# EC with both prime and binary curves, SM2's curve, AES and SHA for the
+# random generator stay. The prefix maps keep the build directory out of the
+# output, so a build anywhere produces the same bytes.
+OSSL=/usr/src/openssl-wasm
 
 
 # Wasm build options
@@ -71,9 +74,9 @@ WOLFOBJS=$(WOLF)/src/ssl.o \
 # every ECDH key in the page with it. libVES.Algo.js takes a fresh view of HEAPU8
 # on every call and copies results out, so growth leaves no stale view behind.
 WASMMOD=WasmECDH
-LDFLAGS=-L$(LIBWOLF) -lwolfssl -sMODULARIZE -s EXPORT_NAME="'$(WASMMOD)'" -s EXPORTED_RUNTIME_METHODS='["HEAPU8"]' -sALLOW_MEMORY_GROWTH=1
+LDFLAGS=$(OSSL)/libcrypto.a -sMODULARIZE -s EXPORT_NAME="'$(WASMMOD)'" -s EXPORTED_RUNTIME_METHODS='["HEAPU8"]' -sALLOW_MEMORY_GROWTH=1 -Oz -flto
 SINGLEFLAGS=-sSINGLE_FILE=1
-CFLAGS=-I$(ROOT)/include -I$(WOLF) -include $(ROOT)/include/wolf_wasm.h
+CFLAGS=-I$(OSSL)/include -Oz -flto
 EMOBJS=$(ROOT)/WasmECDH.o
 TARGET=$(ROOT)/$(WASMMOD)
 
@@ -81,25 +84,12 @@ TARGET=$(ROOT)/$(WASMMOD)
 all:	sidecar single
 
 # Sidecar: WasmECDH.js loader + a separate WasmECDH.wasm (lazy-loaded fallback, e.g. from ves.host/pub)
-sidecar:	$(EMOBJS) $(WOLFLIBS)
+sidecar:	$(EMOBJS)
 	$(CC) $(LDFLAGS) -o $(TARGET).js $(EMOBJS)
 
 # Single-file: WasmECDH.single.js with the .wasm base64-embedded (self-contained, no sidecar)
-single:	$(EMOBJS) $(WOLFLIBS)
+single:	$(EMOBJS)
 	$(CC) $(LDFLAGS) $(SINGLEFLAGS) -o $(TARGET).single.js $(EMOBJS)
 
 clean:
 	rm -f $(EMOBJS) $(TARGET).js $(TARGET).wasm $(TARGET).single.js
-
-
-# WolfSSL partial build targets:
-
-$(WOLFLIBS):	$(WOLFOBJS)
-	mkdir $(LIBWOLF) || true
-	$(AR) cru $@ $(WOLFOBJS)
-
-$(WOLF)/%.o:	$(WOLF)/%.c
-	$(CC) $(CFLAGS) $(WOLFCFLAGS) -c -o $@ $<
-
-clean-wolf:
-	rm -f $(WOLFOBJS) $(WOLFLIBS)

@@ -1,0 +1,75 @@
+{
+  "_about": "Everything compiled into the WebAssembly engines, pinned. build.js writes the release SBOM (libVES-<version>.cdx.json) from this file, so a version change here is a change to the SBOM. The engines' build steps are in WasmOQS/Makefile and WasmECDH/Makefile.",
+  "components": [
+    {
+      "name": "liboqs",
+      "version": "0.13.0",
+      "commit": "21b3f8b0fadbb19e2c6a5df0f165c953ead164e1",
+      "url": "https://github.com/open-quantum-safe/liboqs",
+      "purl": "pkg:github/open-quantum-safe/liboqs@0.13.0",
+      "cpe": "cpe:2.3:a:openquantumsafe:liboqs:0.13.0:*:*:*:*:*:*:*",
+      "license": "MIT",
+      "licenseNote": "liboqs is MIT; some modules in its source tree carry their own licenses, in their folders",
+      "engine": "WasmOQS",
+      "build": "emcmake cmake -DOQS_BUILD_ONLY_LIB=ON -DOQS_USE_OPENSSL=OFF -DOQS_PERMIT_UNSUPPORTED_ARCHITECTURE=ON -DOQS_DIST_BUILD=OFF; emmake make oqs"
+    },
+    {
+      "name": "openssl",
+      "version": "3.5.9",
+      "commit": "45e844fa2a14ec92d146bd8f5778ac130b6625fb",
+      "url": "https://github.com/openssl/openssl",
+      "purl": "pkg:github/openssl/openssl@openssl-3.5.9",
+      "cpe": "cpe:2.3:a:openssl:openssl:3.5.9:*:*:*:*:*:*:*",
+      "license": "Apache-2.0",
+      "engine": "WasmECDH",
+      "build": "libcrypto only, configured as in WasmECDH/Makefile"
+    },
+    {
+      "name": "emscripten",
+      "version": "5.0.7",
+      "url": "https://github.com/emscripten-core/emscripten",
+      "purl": "pkg:github/emscripten-core/emscripten@5.0.7",
+      "license": "MIT OR NCSA",
+      "engine": "WasmOQS WasmECDH",
+      "build": "the runtime linked into each engine: JS glue, libc, malloc, compiler builtins",
+      "components": [
+        {
+          "name": "musl",
+          "version": "1.2.5",
+          "url": "https://musl.libc.org/",
+          "purl": "pkg:generic/musl@1.2.5",
+          "license": "MIT"
+        },
+        {
+          "name": "compiler-rt",
+          "version": "emscripten-5.0.7",
+          "url": "https://github.com/emscripten-core/emscripten/tree/5.0.7/system/lib/compiler-rt",
+          "purl": "pkg:generic/compiler-rt@emscripten-5.0.7",
+          "license": "Apache-2.0 WITH LLVM-exception",
+          "licenseNote": "LLVM's compiler-rt as copied into emscripten's tree; built with clang 23.0.0git (llvm-project 7b58716d)"
+        },
+        {
+          "name": "dlmalloc",
+          "version": "2.8.6",
+          "url": "https://gee.cs.oswego.edu/dl/html/malloc.html",
+          "purl": "pkg:generic/dlmalloc@2.8.6",
+          "license": "CC0-1.0"
+        }
+      ]
+    }
+  ],
+  "vex": [
+    {
+      "id": "CVE-2025-26519",
+      "source": "NVD",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-26519",
+      "affects": "pkg:generic/musl@1.2.5",
+      "state": "not_affected",
+      "justification": "code_not_reachable",
+      "detail": "The bug is in musl's iconv EUC-KR decoder. Neither engine calls iconv (nothing in liboqs, OpenSSL or the engine sources does), so it is not linked in; Emscripten 5.0.7's copy of the decoder also has the corrected bounds check. Checked 2026-11-04."
+    }
+  ],
+  "tools": {
+    "node": "20.19.2"
+  }
+}

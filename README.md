@@ -107,7 +107,13 @@ openssl dgst -sha384 -binary libVES-<version>.js | openssl base64 -A
 One hash covers the whole client. The ML-KEM engine is embedded in the bundle. The ECDH
 engine, fetched only when WebCrypto lacks a curve, comes from
 `https://ves.host/pub/wasm-<version>/` and is checked against hashes the bundle carries;
-to self-host it, copy that directory and set `WasmECDHinit.baseUrl` to it.
+to self-host it, copy that directory and set `WasmECDHinit.baseUrl` to it. It is OpenSSL's
+libcrypto compiled to WebAssembly, so it handles every named curve OpenSSL does, under the
+same names libVES.c uses.
+
+Each release also publishes its SBOM (CycloneDX), `libVES-<version>.cdx.json`, next to
+the hashes: the third-party code compiled into the engines, with versions, commits and
+licenses. The npm package carries it as `libVES.cdx.json`.
 
 - Pin a version-stamped file, never the unversioned `libVES.js`.
 - The bundle starts with a UTF-8 byte-order mark, which makes browsers read it as UTF-8
@@ -122,17 +128,21 @@ Or build from source (see below).
 - `node build.js` — produces version-stamped `libVES-<version>.js` (browser) and
   `libVES-<version>.node.js` (Node) for CDN/`<script>` delivery, plus stable `libVES.js`
   and `libVES.node.js` (the npm `browser` / `main` entry points), the lazy ECDH engine
-  laid out as served (`wasm-<version>/`), and `libVES-<version>.sri` with the SRI hash of
-  every version-stamped file. Cross-platform; `Makefile.bat` and `make all` both call it.
+  laid out as served (`wasm-<version>/`), `libVES-<version>.sri` with the SRI hash of
+  every version-stamped file, and `libVES-<version>.cdx.json`, the SBOM, written from
+  [`build-inputs.json`](build-inputs.json). Cross-platform; `Makefile.bat` and `make all`
+  both call it.
 - `node build.js --minify` — also writes `libVES-<version>.min.js` and `libVES.min.js`
   (requires `npm i -D terser`).
 - Requires **Node 18+** (uses the built-in `fetch`).
 
 ### Wasm builds
 
-Post-quantum (ML-KEM via liboqs) and ECDH primitives are compiled to WebAssembly. See
-the comments in [`WasmOQS/Makefile`](WasmOQS/Makefile) and
-[`WasmECDH/Makefile`](WasmECDH/Makefile).
+Post-quantum (ML-KEM via liboqs) and ECDH (via OpenSSL) primitives are compiled to
+WebAssembly. See the comments in [`WasmOQS/Makefile`](WasmOQS/Makefile) and
+[`WasmECDH/Makefile`](WasmECDH/Makefile); the pinned versions and build options are in
+[`build-inputs.json`](build-inputs.json). The ECDH engine's tests are in
+[`WasmECDH/test/`](WasmECDH/test/).
 
 ## Post-quantum
 
