@@ -1,0 +1,86 @@
+name: Reproduce a release
+
+# Rebuilds a release from its tag and the third-party sources it pins
+# (build-inputs.json), in the emscripten image its recipe names
+# (repro/recipes/<version>.sh), and checks every rebuilt file against the
+# hashes published in the release notes and at
+# https://ves.host/pub/libVES-<version>.sri. Runs for each published release,
+# and by hand for any release that has a recipe. The log of each run is the
+# public record; see "Reproducing a release" in the README.
+
+on:
+  release:
+    types: [ published ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag, such as v3.2.4'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  recipe:
+    name: Find the recipe
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.recipe.outputs.tag }}
+      image: ${{ steps.recipe.outputs.image }}
+      node: ${{ steps.recipe.outputs.node }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: recipe
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "not a release tag: $TAG"; exit 1 ;;
+          esac
+          git fetch -q --depth 1 origin "refs/tags/$TAG:refs/tags/$TAG"
+          version=$(git show "$TAG:VERSION" | tr -d ' \r\n')
+          recipe=repro/recipes/$version.sh
+          test -f "$recipe" || { echo "no recipe for $version"; exit 1; }
+          image=$(sed -n 's/^IMAGE=//p' "$recipe")
+          test -n "$image" || { echo "$recipe names no IMAGE"; exit 1; }
+          node=$(git show "$TAG:build-inputs.json" | node -e '
+            let s = ""; process.stdin.on("data", (d) => s += d)
+              .on("end", () => console.log(JSON.parse(s).tools.node));')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "node=$node" >> "$GITHUB_OUTPUT"
+          echo "$TAG: version $version, image $image, node $node"
+
+  reproduce:
+    name: Rebuild ${{ needs.recipe.outputs.tag }}
+    needs: recipe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container:
+      image: ${{ needs.recipe.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.recipe.outputs.node }}
+      - name: Rebuild and compare with the published hashes
+        env:
+          TAG: ${{ needs.recipe.outputs.tag }}
+          REPRO_IMAGE: ${{ needs.recipe.outputs.image }}
+        run: bash repro/reproduce.sh --work "$GITHUB_WORKSPACE/.repro" "$TAG"
+      - name: Show the result on the run's summary page
+        if: always()
+        run: |
+          if [ -f .repro/summary.txt ]; then
+            { echo '```'; cat .repro/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reproduce-${{ needs.recipe.outputs.tag }}
+          path: |
+            .repro/summary.txt
+            .repro/logs/
+            .repro/out/
+          if-no-files-found: ignore

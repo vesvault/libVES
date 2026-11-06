@@ -98,7 +98,9 @@ Or load a released bundle with a `<script>` tag, pinned by its Subresource Integ
 Each release publishes its hashes in the GitHub release notes and at
 `https://ves.host/pub/libVES-<version>.sri`. Take the hash from the release notes: a hash
 fetched from the same server as the file proves nothing if that server is compromised.
-To self-host the file, check it against the published hash first:
+The hashes can also be checked against the source: a release rebuilds byte for byte from
+its tag ([Reproducing a release](#reproducing-a-release)). To self-host the file, check it
+against the published hash first:
 
 ```sh
 openssl dgst -sha384 -binary libVES-<version>.js | openssl base64 -A
@@ -143,6 +145,28 @@ WebAssembly. See the comments in [`WasmOQS/Makefile`](WasmOQS/Makefile) and
 [`WasmECDH/Makefile`](WasmECDH/Makefile); the pinned versions and build options are in
 [`build-inputs.json`](build-inputs.json). The ECDH engine's tests are in
 [`WasmECDH/test/`](WasmECDH/test/).
+
+### Reproducing a release
+
+Releases from 3.2.4 on rebuild byte for byte from their tag and the third-party sources
+they pin, so anyone can check that the published files are built from this source.
+[`repro/reproduce.sh`](repro/reproduce.sh) fetches the tag, and the liboqs and OpenSSL
+commits its `build-inputs.json` names, builds both engines and both bundles with the steps
+in `repro/recipes/<version>.sh`, and checks every file against the hashes in the release
+notes and at `https://ves.host/pub/libVES-<version>.sri`. It ends with `REPRODUCED` or
+`NOT REPRODUCED`. Run it in the emscripten image the recipe names:
+
+```sh
+docker run --rm -v "$PWD:/src" \
+    emscripten/emsdk:5.0.7@sha256:4e332f7343b6f66320bf72f7ecc01a3d9f3866721a13b0e5c7b96505d6ab148a \
+    repro/reproduce.sh v3.2.4
+```
+
+or on any Linux host with emscripten at that version, git, cmake, make, perl, curl and Node
+on the `PATH`. It fetches the sources over the network, needs about 400 MB of disk, and
+takes about 20 minutes on one CPU. The
+[Reproduce a release](.github/workflows/reproduce.yml) workflow runs the same check on
+GitHub for each release, and its runs are public.
 
 ## Post-quantum
 

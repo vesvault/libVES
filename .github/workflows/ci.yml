@@ -1,18 +1,19 @@
 name: CI
 
-# Lightweight CI for the libVES JavaScript library. It deliberately does NOT run
-# a full `node build.js`, and does NOT run tests/ — neither is possible from
-# public CI:
+# Lightweight CI for the libVES JavaScript library. It does NOT run a full
+# `node build.js`, and does NOT run tests/:
 #
-#   * The bundle embeds WebAssembly glue (WasmOQS / WasmECDH) built with the
-#     emscripten + liboqs + wolfSSL toolchain. That glue is intentionally never
-#     committed (see .gitignore), so a clean checkout has no bundle inputs.
+#   * The bundle embeds WebAssembly engines (WasmOQS / WasmECDH) built with
+#     emscripten from liboqs and OpenSSL, which takes about 20 minutes. The
+#     engines are never committed (see .gitignore), so a clean checkout has no
+#     bundle inputs. reproduce.yml builds them, and the bundles, for each
+#     release, and checks them against the published hashes.
 #   * tests/ drive the live VES API and need two real, synced VES accounts
 #     (see tests/vestest.conf.example.js), which can't be provisioned here.
 #
-# So this guards the two things public CI *can* check cheaply on every push/PR:
-# that every source module parses on each supported Node version, and that the
-# npm manifest stays valid.
+# So this guards the two things CI can check cheaply on every push/PR: that
+# every source module parses on each supported Node version, and that the npm
+# manifest stays valid.
 
 on:
   push:
