@@ -1,8 +1,9 @@
 #!/bin/bash
-# Rebuild a libVES.js release from its public tag and the inputs it pins, and
-# check every rebuilt file against the hashes published for that release.
+# Rebuild a libVES.js release from its public tag, and check every rebuilt file
+# against the hashes published for that release.
 #
 # Usage: repro/reproduce.sh [options] <tag>            e.g. repro/reproduce.sh v3.2.4
+#        repro/reproduce.sh --image <tag>              the emscripten image to run it in
 #
 #   --source URL     git repository that holds the tag
 #                    (default: https://github.com/vesvault/libVES.git)
@@ -15,22 +16,30 @@
 #                    so nothing compiled earlier on this machine goes into the rebuild)
 #   --keep           keep the sources and objects (default: keep only outputs and logs)
 #
-# Needs bash, git, make, cmake, perl, curl, node, and emscripten (emcc, emcmake,
-# emmake) on PATH, at the emscripten version the release's build-inputs.json
-# names. repro/recipes/<version>.sh holds the build steps of each release.
+# The build is the release's own: the tag's build-release.sh, which fetches
+# the third-party sources at the commits the tag's build-inputs.json pins.
+# 3.2.4 predates build-release.sh; for it, this script runs the same steps,
+# kept below as they ran for that release. Releases before 3.2.4 are not
+# covered. The comparison is this script's, not the release's.
+#
+# Needs bash, git, make, cmake, perl, curl, node, and emscripten (emcc,
+# emcmake, emmake, emconfigure) on PATH, at the version the release names.
 #
 # Exit status: 0 when every published hash matches the rebuilt file, 1 when one
 # differs or is missing, 2 on a usage or build error.
 
 set -euo pipefail
 
-HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SOURCE=https://github.com/vesvault/libVES.git
 WORK=
 EXPECT=()
 JOBS=$(nproc 2>/dev/null || echo 1)
 EMCACHE=
 KEEP=0
+IMAGE_ONLY=0
+
+# The emscripten image for 3.2.4, which predates tools.image in build-inputs.json.
+IMAGE_3_2_4=emscripten/emsdk:5.0.7@sha256:4e332f7343b6f66320bf72f7ecc01a3d9f3866721a13b0e5c7b96505d6ab148a
 
 die() { echo "reproduce: $*" >&2; exit 2; }
 say() { echo "== $*"; }
@@ -43,6 +52,7 @@ while [ $# -gt 0 ]; do
         --jobs)     JOBS=${2:?}; shift 2 ;;
         --em-cache) EMCACHE=${2:?}; shift 2 ;;
         --keep)     KEEP=1; shift ;;
+        --image)    IMAGE_ONLY=1; shift ;;
         -h|--help)  sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;;
         -*)         die "unknown option $1" ;;
         *)          break ;;
@@ -51,7 +61,46 @@ done
 [ $# -eq 1 ] || die "usage: $0 [options] <tag>"
 TAG=$1
 
-for tool in git make cmake perl curl node emcc emcmake emmake; do
+# fetch_tag <dir>: the tag's tree, checked out in <dir>
+fetch_tag() {
+    git init -q "$1"
+    git -C "$1" fetch -q --depth 1 "$SOURCE" "refs/tags/$TAG:refs/tags/$TAG" || die "cannot fetch tag $TAG from $SOURCE"
+    git -C "$1" -c advice.detachedHead=false checkout -q "$TAG^{commit}"
+}
+
+# input <file> <component|tools> <field>: a field from a build-inputs.json;
+# "tag" is a component's upstream tag, from its purl. Empty if absent.
+input() {
+    node -e '
+        const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+        const [name, field] = process.argv.slice(2);
+        const c = name === "tools" ? j.tools : (j.components || []).find((c) => c.name === name);
+        const v = !c ? null : field === "tag" ? (c.purl || "").split("@")[1] : c[field];
+        if (v != null) console.log(v);
+    ' "$@"
+}
+
+# image_of <tree>: the emscripten image a release names. Read with sed, not
+# node, so that --image needs only git on the host that runs docker.
+image_of() {
+    local image
+    image=$(sed -n 's/^ *"image": *"\([^"]*\)".*/\1/p' "$1/build-inputs.json" | sed -n 1p)
+    if [ -z "$image" ] && [ "$(tr -d ' \r\n' < "$1/VERSION")" = 3.2.4 ]; then
+        image=$IMAGE_3_2_4
+    fi
+    [ -n "$image" ] || die "$TAG names no emscripten image"
+    echo "$image"
+}
+
+if [ "$IMAGE_ONLY" = 1 ]; then
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/libves-image.XXXXXX")
+    trap 'rm -rf "$tmp"' EXIT
+    fetch_tag "$tmp" >&2
+    image_of "$tmp"
+    exit 0
+fi
+
+for tool in git make cmake perl curl node emcc emcmake emmake emconfigure; do
     command -v "$tool" >/dev/null || die "$tool is not on PATH"
 done
 
@@ -61,8 +110,8 @@ else
     mkdir -p "$WORK"
     [ -z "$(ls -A "$WORK")" ] || die "$WORK is not empty"
 fi
-WORK=$(cd "$WORK" && pwd)
-mkdir "$WORK/logs" "$WORK/out"
+WORK=$(cd "$WORK" && pwd -P)
+mkdir "$WORK/logs" "$WORK/out" "$WORK/src"
 export EM_CACHE=${EMCACHE:-$WORK/emcache}
 
 cleanup() {
@@ -73,8 +122,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Run a build step in a subshell, its output in logs/<name>.log; show the end of
-# it on failure. Started with & and waited for, because a subshell run as an if
+# Run a step in a subshell, its output in logs/<name>.log; show the end of it
+# on failure. Started with & and waited for, because a subshell run as an if
 # or || condition ignores set -e and would carry on past a failed command.
 step() {
     local name=$1 pid rc=0; shift
@@ -90,85 +139,75 @@ step() {
 # --- the release source ----------------------------------------------------
 
 say "libVES $TAG from $SOURCE"
-mkdir "$WORK/src"
 LIBVES=$WORK/src/libVES
-git init -q "$LIBVES"
-git -C "$LIBVES" fetch -q --depth 1 "$SOURCE" "refs/tags/$TAG:refs/tags/$TAG" || die "cannot fetch tag $TAG"
-COMMIT=$(git -C "$LIBVES" rev-parse "$TAG^{commit}")
-TREE=$(git -C "$LIBVES" rev-parse "$TAG^{tree}")
-git -C "$LIBVES" -c advice.detachedHead=false checkout -q "$COMMIT"
+fetch_tag "$LIBVES"
+COMMIT=$(git -C "$LIBVES" rev-parse HEAD)
+TREE=$(git -C "$LIBVES" rev-parse "HEAD^{tree}")
 VERSION=$(tr -d ' \r\n' < "$LIBVES/VERSION")
-RECIPE=$HERE/recipes/$VERSION.sh
-[ -f "$RECIPE" ] || die "no recipe for $VERSION ($RECIPE)"
 INPUTS=$LIBVES/build-inputs.json
-[ -f "$INPUTS" ] || die "$TAG has no build-inputs.json"
+[ -f "$INPUTS" ] || die "$TAG has no build-inputs.json: releases before 3.2.4 are not covered"
 
-# input <component> <field>: a field of a component in build-inputs.json;
-# "tag" is the upstream tag, from the purl.
-input() {
-    node -e '
-        const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-        const [name, field] = process.argv.slice(2);
-        const c = name === "tools" ? j.tools : j.components.find((c) => c.name === name);
-        const v = !c ? null : field === "tag" ? (c.purl || "").split("@")[1] : c[field];
-        if (v == null) process.exit(3);
-        console.log(v);
-    ' "$INPUTS" "$1" "$2" || die "build-inputs.json has no $2 for $1"
-}
-
-# --- the toolchain ----------------------------------------------------------
-
-# (sed -n 1p rather than head: head closing the pipe early can fail the
-# command under pipefail.)
-EM_WANT=$(input emscripten version)
+EM_WANT=$(input "$INPUTS" emscripten version)
 EM_LINE=$(emcc --version | sed -n 1p)
 EM_HAVE=
 [[ $EM_LINE =~ ([0-9]+\.[0-9]+\.[0-9]+) ]] && EM_HAVE=${BASH_REMATCH[1]}
 [ "$EM_HAVE" = "$EM_WANT" ] || die "emscripten ${EM_HAVE:-unknown} on PATH; $TAG was built with $EM_WANT"
-NODE_WANT=$(input tools node)
-NODE_HAVE=$(node --version | sed 's/^v//')
 
-# --- the pinned inputs --------------------------------------------------------
+# --- 3.2.4: the steps its release build ran (2026-11-04), as they were ------
 
-# fetch <component>: check out the pinned commit into src/<component>.
-fetch() {
-    local name=$1 dir=$WORK/src/$1 url commit tag got upstream
-    url=$(input "$name" url)
-    commit=$(input "$name" commit)
-    tag=$(input "$name" tag)
-    git init -q "$dir"
-    git -C "$dir" fetch -q --depth 1 "$url" "$commit" || die "cannot fetch $name $commit from $url"
-    git -C "$dir" -c advice.detachedHead=false checkout -q FETCH_HEAD
-    got=$(git -C "$dir" rev-parse HEAD)
-    [ "$got" = "$commit" ] || die "$name: fetched $got, expected $commit"
-    # The upstream tag should still name the pinned commit (for an annotated
-    # tag, the commit is on the peeled ^{} line). The build uses the commit
-    # either way.
-    upstream=$(git ls-remote "$url" "refs/tags/$tag" "refs/tags/$tag^{}" |
-        awk '$2 ~ /\^\{\}$/ { p = $1 } $2 !~ /\^\{\}$/ { t = $1 } END { print (p != "" ? p : t) }') || upstream=
-    if [ "$upstream" = "$commit" ]; then
-        printf '%-11s %-8s %s  (tag %s)\n' "$name" "$(input "$name" version)" "$commit" "$tag" >> "$WORK/inputs.txt"
-    else
-        printf '%-11s %-8s %s  (tag %s now names %s)\n' "$name" "$(input "$name" version)" "$commit" "$tag" "${upstream:-nothing}" >> "$WORK/inputs.txt"
-    fi
+# The ML-KEM engine carries one liboqs source path (an error message in
+# src/common/aes/aes_c.c), so liboqs's path is mapped to the one it was built
+# in. OpenSSL's configure line maps its own path.
+build_3_2_4() {
+    local deps=$WORK/src/deps name dir commit
+    mkdir -p "$deps"
+    for name in liboqs openssl; do
+        dir=$deps/$name
+        commit=$(input "$INPUTS" "$name" commit)
+        git init -q "$dir"
+        git -C "$dir" fetch -q --depth 1 "$(input "$INPUTS" "$name" url)" "$commit"
+        git -C "$dir" -c advice.detachedHead=false checkout -q FETCH_HEAD
+        [ "$(git -C "$dir" rev-parse HEAD)" = "$commit" ]
+    done
+    mkdir "$deps/liboqs/build"
+    (cd "$deps/liboqs/build" &&
+        emcmake cmake -DOQS_BUILD_ONLY_LIB=ON -DOQS_USE_OPENSSL=OFF \
+            -DOQS_PERMIT_UNSUPPORTED_ARCHITECTURE=ON -DOQS_DIST_BUILD=OFF \
+            -DCMAKE_C_FLAGS="-fmacro-prefix-map=$deps/liboqs=/usr/src/liboqs-wasm" .. &&
+        emmake make -j"$JOBS" oqs)
+    (cd "$deps/openssl" &&
+        emconfigure ./Configure linux-generic32 no-asm no-threads no-shared no-dso \
+            no-engine no-module no-legacy no-sock no-ui-console no-tests no-apps \
+            no-docs no-afalgeng no-async no-secure-memory no-autoload-config \
+            no-filenames no-err no-stdio no-autoalginit no-autoerrinit \
+            no-aria no-argon2 no-bf no-blake2 no-camellia no-cast no-chacha no-cmac \
+            no-cmp no-cms no-comp no-ct no-des no-dgram no-dh no-dsa no-ecdsa no-ecx \
+            no-gost no-http no-idea no-md4 no-mdc2 no-ml-dsa no-ml-kem no-ocb \
+            no-ocsp no-poly1305 no-quic no-rc2 no-rc4 no-rfc3779 no-rmd160 \
+            no-scrypt no-seed no-siphash no-siv no-slh-dsa no-sm4 no-srp no-ts \
+            no-whirlpool no-ssl no-tls no-dtls \
+            --with-rand-seed=getrandom CC=emcc AR=emar RANLIB=emranlib -Oz -flto \
+            -ffile-prefix-map="$deps/openssl"=/src/openssl -fmacro-prefix-map="$deps/openssl"=/src/openssl &&
+        sed -i 's|^CROSS_COMPILE=.*|CROSS_COMPILE=|' Makefile &&
+        emmake make -j"$JOBS" build_generated libcrypto.a)
+    emmake make -C "$LIBVES/WasmOQS" LIBOQS="$deps/liboqs/build"
+    emmake make -C "$LIBVES/WasmECDH" OSSL="$deps/openssl"
+    (cd "$LIBVES" && node build.js --out "$WORK/out")
 }
 
-declare -A KNOWN_SHA256=()
-# shellcheck source=/dev/null
-. "$RECIPE"
+# --- the build ----------------------------------------------------------------
 
-: > "$WORK/inputs.txt"
-for c in "${COMPONENTS[@]}"; do
-    say "$c"
-    fetch "$c"
-    step "build-$c" "build_$c" "$WORK/src/$c"
-done
-
-say "engines"
-step engines build_engines "$LIBVES"
-
-say "bundles"
-step bundles bash -c 'cd "$1" && node build.js --out "$2"' _ "$LIBVES" "$WORK/out"
+if [ -f "$LIBVES/build-release.sh" ]; then
+    HOW="the release's own build-release.sh"
+    BUILD=(bash "$LIBVES/build-release.sh" --work "$WORK/src/deps" --out "$WORK/out" --jobs "$JOBS")
+elif [ "$VERSION" = 3.2.4 ]; then
+    HOW="the 3.2.4 release build's steps, in this script"
+    BUILD=(build_3_2_4)
+else
+    die "$TAG has no build-release.sh: releases before 3.2.4 are not covered"
+fi
+say "build, with $HOW"
+step build "${BUILD[@]}"
 
 # --- compare ----------------------------------------------------------------
 
@@ -186,25 +225,28 @@ sri() {
 
 {
     echo
-    echo "libVES $TAG (version $VERSION)"
+    echo "libVES $TAG (version $VERSION), built with $HOW"
     printf '%-11s %-8s %s  (tree %s, from %s)\n' libVES "$VERSION" "$COMMIT" "$TREE" "$SOURCE"
-    cat "$WORK/inputs.txt"
+    # Each pinned component, and whether its upstream tag still names the
+    # pinned commit (for an annotated tag, the commit is on the ^{} line).
+    for name in $(node -e '
+            const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            for (const c of j.components) if (c.commit) console.log(c.name);
+        ' "$INPUTS"); do
+        url=$(input "$INPUTS" "$name" url)
+        commit=$(input "$INPUTS" "$name" commit)
+        tag=$(input "$INPUTS" "$name" tag)
+        upstream=$(git ls-remote "$url" "refs/tags/$tag" "refs/tags/$tag^{}" |
+            awk '$2 ~ /\^\{\}$/ { p = $1 } $2 !~ /\^\{\}$/ { t = $1 } END { print (p != "" ? p : t) }') || upstream=
+        if [ "$upstream" = "$commit" ]; then note="tag $tag"; else note="tag $tag now names ${upstream:-nothing}"; fi
+        printf '%-11s %-8s %s  (%s)\n' "$name" "$(input "$INPUTS" "$name" version)" "$commit" "$note"
+    done
+    node_want=$(input "$INPUTS" tools node)
+    node_have=$(node --version | sed 's/^v//')
     printf '%-11s %s\n' emscripten "$EM_LINE"
-    printf '%-11s %s\n' node "v$NODE_HAVE$( [ "$NODE_HAVE" = "$NODE_WANT" ] || echo " (the release names $NODE_WANT)")"
+    printf '%-11s %s\n' node "v$node_have$( [ -z "$node_want" ] || [ "$node_have" = "$node_want" ] || echo " (the release names $node_want)")"
     printf '%-11s %s\n' cmake "$(cmake --version | sed -n 1p)"
     printf '%-11s %s\n' host "$(uname -srm)${REPRO_IMAGE:+, image $REPRO_IMAGE}"
-    [ ${#KNOWN_SHA256[@]} -gt 0 ] || exit 0
-    echo
-    echo "Intermediate files against the release build (for diagnosis only):"
-    for f in "${!KNOWN_SHA256[@]}"; do
-        if [ -f "$WORK/src/$f" ]; then
-            got=$(sha256sum "$WORK/src/$f" | cut -d' ' -f1)
-            [ "$got" = "${KNOWN_SHA256[$f]}" ] && r=same || r=different
-        else
-            r=missing
-        fi
-        printf '  %-9s %s\n' "$r" "$f"
-    done | sort -k2
 } | tee "$WORK/summary.txt"
 
 declare -A MATCHED=()

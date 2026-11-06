@@ -41,13 +41,21 @@
 ROOT=$(shell pwd)
 
 
-# Path to the libqos source code
-# https://github.com/open-quantum-safe/liboqs
-# The liboqs project has to be built with emscripten prior to invoking this
-# makefile, the output lib is expected to be at $LIBOQS/lib/liboqs.a:
-# > emcmake cmake -DOQS_PERMIT_UNSUPPORTED_ARCHITECTURE=ON -DOQS_USE_OPENSSL=OFF $LIBOQS
-# > emmake make -C $LIBOQS
-LIBOQS=/usr/src/liboqs
+# liboqs (https://github.com/open-quantum-safe/liboqs), built for wasm before
+# the engine: `emmake make liboqs` builds the source tree at $(LIBOQS_SRC) into
+# $(LIBOQS), which then holds lib/liboqs.a and include/. build-release.sh
+# fetches the commit build-inputs.json pins and runs it. The full algorithm set
+# stays: libVES defaults to ML-KEM, but a key can use any liboqs algorithm.
+# OQS_DIST_BUILD=OFF is the setting the engine has always been built with
+# (liboqs defaults to ON, which gives a different ML-KEM engine).
+# One liboqs source path ends up in the engine, in an error message, so the
+# build maps its own source path to the one the released engines carry,
+# $(LIBOQS_PATH): a build in any directory produces the same bytes.
+LIBOQS_SRC=/usr/src/liboqs-wasm
+LIBOQS=$(LIBOQS_SRC)/build
+LIBOQS_PATH=/usr/src/liboqs-wasm
+LIBOQS_CMAKE=-DOQS_BUILD_ONLY_LIB=ON -DOQS_USE_OPENSSL=OFF \
+	-DOQS_PERMIT_UNSUPPORTED_ARCHITECTURE=ON -DOQS_DIST_BUILD=OFF
 
 
 WASMMOD=WasmOQS
@@ -70,3 +78,12 @@ single:	$(EMOBJS)
 
 clean:
 	rm -f $(EMOBJS) $(TARGET).js $(TARGET).wasm $(TARGET).single.js
+
+# liboqs itself, from its source tree (see LIBOQS_SRC above)
+liboqs:
+	mkdir -p $(LIBOQS)
+	cd $(LIBOQS) && emcmake cmake $(LIBOQS_CMAKE) \
+		-DCMAKE_C_FLAGS="-fmacro-prefix-map=$(LIBOQS_SRC)=$(LIBOQS_PATH)" $(LIBOQS_SRC)
+	$(MAKE) -C $(LIBOQS) oqs
+
+.PHONY: all sidecar single clean liboqs

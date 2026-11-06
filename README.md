@@ -141,28 +141,30 @@ Or build from source (see below).
 ### Wasm builds
 
 Post-quantum (ML-KEM via liboqs) and ECDH (via OpenSSL) primitives are compiled to
-WebAssembly. See the comments in [`WasmOQS/Makefile`](WasmOQS/Makefile) and
-[`WasmECDH/Makefile`](WasmECDH/Makefile); the pinned versions and build options are in
-[`build-inputs.json`](build-inputs.json). The ECDH engine's tests are in
+WebAssembly. [`build-release.sh`](build-release.sh) (or `make release`) builds a release
+from source: it fetches liboqs and OpenSSL at the commits
+[`build-inputs.json`](build-inputs.json) pins, builds them and both engines with the steps
+in [`WasmOQS/Makefile`](WasmOQS/Makefile) and [`WasmECDH/Makefile`](WasmECDH/Makefile),
+and runs `build.js`. It needs emscripten at the version `build-inputs.json` names, and the
+engines come out the same in any directory. The ECDH engine's tests are in
 [`WasmECDH/test/`](WasmECDH/test/).
 
 ### Reproducing a release
 
-Releases from 3.2.4 on rebuild byte for byte from their tag and the third-party sources
-they pin, so anyone can check that the published files are built from this source.
-[`repro/reproduce.sh`](repro/reproduce.sh) fetches the tag, and the liboqs and OpenSSL
-commits its `build-inputs.json` names, builds both engines and both bundles with the steps
-in `repro/recipes/<version>.sh`, and checks every file against the hashes in the release
-notes and at `https://ves.host/pub/libVES-<version>.sri`. It ends with `REPRODUCED` or
-`NOT REPRODUCED`. Run it in the emscripten image the recipe names:
+Releases from 3.2.4 on rebuild byte for byte from their tag, so anyone can check that the
+published files are built from this source. [`repro/reproduce.sh`](repro/reproduce.sh)
+fetches a release tag, builds it with that release's own `build-release.sh`, and checks
+every file against the hashes in the release notes and at
+`https://ves.host/pub/libVES-<version>.sri`. It ends with `REPRODUCED` or
+`NOT REPRODUCED`. (3.2.4 came before `build-release.sh`; the script runs the same steps for
+it.) Run it in the emscripten image the release names, which
+`repro/reproduce.sh --image <tag>` prints:
 
 ```sh
-docker run --rm -v "$PWD:/src" \
-    emscripten/emsdk:5.0.7@sha256:4e332f7343b6f66320bf72f7ecc01a3d9f3866721a13b0e5c7b96505d6ab148a \
-    repro/reproduce.sh v3.2.4
+docker run --rm -v "$PWD:/src" "$(repro/reproduce.sh --image v3.2.4)" repro/reproduce.sh v3.2.4
 ```
 
-or on any Linux host with emscripten at that version, git, cmake, make, perl, curl and Node
+or on any Linux host with that emscripten version, git, cmake, make, perl, curl and Node
 on the `PATH`. It fetches the sources over the network, needs about 400 MB of disk, and
 takes about 20 minutes on one CPU. The
 [Reproduce a release](.github/workflows/reproduce.yml) workflow runs the same check on

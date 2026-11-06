@@ -42,31 +42,27 @@
 ROOT=$(shell pwd)
 
 
-# Path to OpenSSL's libcrypto, built for wasm with emscripten before invoking
-# this makefile: $(OSSL)/libcrypto.a and $(OSSL)/include. The release build
-# uses OpenSSL 3.5.9 (the 3.5 LTS line), configured as:
-# > git clone --depth 1 --branch openssl-3.5.9 https://github.com/openssl/openssl.git
-# > cd openssl
-# > emconfigure ./Configure linux-generic32 no-asm no-threads no-shared no-dso \
-#       no-engine no-module no-legacy no-sock no-ui-console no-tests no-apps \
-#       no-docs no-afalgeng no-async no-secure-memory no-autoload-config \
-#       no-filenames no-err no-stdio no-autoalginit no-autoerrinit \
-#       no-aria no-argon2 no-bf no-blake2 no-camellia no-cast no-chacha no-cmac \
-#       no-cmp no-cms no-comp no-ct no-des no-dgram no-dh no-dsa no-ecdsa no-ecx \
-#       no-gost no-http no-idea no-md4 no-mdc2 no-ml-dsa no-ml-kem no-ocb \
-#       no-ocsp no-poly1305 no-quic no-rc2 no-rc4 no-rfc3779 no-rmd160 \
-#       no-scrypt no-seed no-siphash no-siv no-slh-dsa no-sm4 no-srp no-ts \
-#       no-whirlpool no-ssl no-tls no-dtls \
-#       --with-rand-seed=getrandom CC=emcc AR=emar RANLIB=emranlib -Oz -flto \
-#       -ffile-prefix-map=$PWD=/src/openssl -fmacro-prefix-map=$PWD=/src/openssl
-# > sed -i 's|^CROSS_COMPILE=.*|CROSS_COMPILE=|' Makefile
-# > emmake make build_generated libcrypto.a
-# Everything the engine does not use is left out: the default provider
-# otherwise links every algorithm OpenSSL has (1.6 MB of wasm against 760 KB).
-# EC with both prime and binary curves, SM2's curve, AES and SHA for the
-# random generator stay. The prefix maps keep the build directory out of the
-# output, so a build anywhere produces the same bytes.
+# OpenSSL's libcrypto (https://github.com/openssl/openssl), built for wasm
+# before the engine: `emmake make openssl` configures and builds the source
+# tree at $(OSSL) in place, which then holds libcrypto.a and include/.
+# build-release.sh fetches the commit build-inputs.json pins (3.5.9, the 3.5
+# LTS line) and runs it. Everything the engine does not use is left out: the
+# default provider otherwise links every algorithm OpenSSL has (1.6 MB of wasm
+# against 760 KB). EC with both prime and binary curves, SM2's curve, AES and
+# SHA for the random generator stay. The prefix maps keep the build directory
+# out of the output, so a build anywhere produces the same bytes.
 OSSL=/usr/src/openssl-wasm
+OSSL_CONFIG=linux-generic32 no-asm no-threads no-shared no-dso \
+	no-engine no-module no-legacy no-sock no-ui-console no-tests no-apps \
+	no-docs no-afalgeng no-async no-secure-memory no-autoload-config \
+	no-filenames no-err no-stdio no-autoalginit no-autoerrinit \
+	no-aria no-argon2 no-bf no-blake2 no-camellia no-cast no-chacha no-cmac \
+	no-cmp no-cms no-comp no-ct no-des no-dgram no-dh no-dsa no-ecdsa no-ecx \
+	no-gost no-http no-idea no-md4 no-mdc2 no-ml-dsa no-ml-kem no-ocb \
+	no-ocsp no-poly1305 no-quic no-rc2 no-rc4 no-rfc3779 no-rmd160 \
+	no-scrypt no-seed no-siphash no-siv no-slh-dsa no-sm4 no-srp no-ts \
+	no-whirlpool no-ssl no-tls no-dtls \
+	--with-rand-seed=getrandom CC=emcc AR=emar RANLIB=emranlib -Oz -flto
 
 
 # Wasm build options
@@ -93,3 +89,12 @@ single:	$(EMOBJS)
 
 clean:
 	rm -f $(EMOBJS) $(TARGET).js $(TARGET).wasm $(TARGET).single.js
+
+# OpenSSL's libcrypto, in its source tree (see OSSL above)
+openssl:
+	cd $(OSSL) && emconfigure ./Configure $(OSSL_CONFIG) \
+		-ffile-prefix-map=$$PWD=/src/openssl -fmacro-prefix-map=$$PWD=/src/openssl
+	sed -i 's|^CROSS_COMPILE=.*|CROSS_COMPILE=|' $(OSSL)/Makefile
+	$(MAKE) -C $(OSSL) build_generated libcrypto.a
+
+.PHONY: all sidecar single clean openssl

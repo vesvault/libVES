@@ -1,5 +1,5 @@
 {
-  "_about": "Everything compiled into the WebAssembly engines, pinned. build.js writes the release SBOM (libVES-<version>.cdx.json) from this file, so a version change here is a change to the SBOM. The engines' build steps are in WasmOQS/Makefile and WasmECDH/Makefile.",
+  "_about": "Everything compiled into the WebAssembly engines, pinned. build.js writes the release SBOM (libVES-<version>.cdx.json) from this file, so a version change here is a change to the SBOM. The engines' build steps are in WasmOQS/Makefile and WasmECDH/Makefile, and build-release.sh runs them. tools.image is the emscripten image repro/reproduce.sh and its GitHub workflow rebuild a release in.",
   "components": [
     {
       "name": "liboqs",
@@ -70,6 +70,7 @@
     }
   ],
   "tools": {
-    "node": "20.19.2"
+    "node": "20.19.2",
+    "image": "emscripten/emsdk:5.0.7@sha256:4e332f7343b6f66320bf72f7ecc01a3d9f3866721a13b0e5c7b96505d6ab148a"
   }
 }
